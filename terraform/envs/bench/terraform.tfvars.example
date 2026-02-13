@@ -1,0 +1,72 @@
+# -----------------------------------------------------------------------------
+# Temporal SRE Copilot - Terraform Variables Example
+# -----------------------------------------------------------------------------
+# Copy this file to terraform.tfvars and fill in values from your
+# temporal-dsql-deploy-ecs deployment.
+#
+# To get values from temporal-dsql-deploy-ecs:
+#   cd ../temporal-dsql-deploy-ecs/terraform/envs/bench
+#   terraform output
+# -----------------------------------------------------------------------------
+
+project_name = "temporal-bench"
+aws_region   = "eu-west-1"
+
+# -----------------------------------------------------------------------------
+# VPC Configuration
+# Get from: terraform output -raw vpc_id
+# Get from: terraform output -json private_subnet_ids
+# -----------------------------------------------------------------------------
+vpc_id             = "vpc-xxxxxxxxxxxxxxxxx"
+private_subnet_ids = ["subnet-xxxxxxxxxxxxxxxxx", "subnet-xxxxxxxxxxxxxxxxx"]
+vpc_cidr           = "10.0.0.0/16"
+
+# -----------------------------------------------------------------------------
+# DSQL Configuration
+# Get from: terraform output -raw dsql_endpoint
+# Get from: terraform output -raw dsql_cluster_arn
+# -----------------------------------------------------------------------------
+dsql_endpoint    = "xxxxxxxxxxxxxxxxx.dsql.eu-west-1.on.aws"
+dsql_cluster_arn = "arn:aws:dsql:eu-west-1:123456789012:cluster/xxxxxxxxxxxxxxxxx"
+dsql_database    = "copilot"
+
+# -----------------------------------------------------------------------------
+# Observability Configuration
+# Get from: terraform output -raw prometheus_workspace_id
+# Get from: terraform output -raw prometheus_workspace_arn
+# Get from: terraform output -raw loki_url
+# Get from: terraform output -raw loki_security_group_id
+# -----------------------------------------------------------------------------
+amp_workspace_id       = "ws-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+amp_workspace_arn      = "arn:aws:aps:eu-west-1:123456789012:workspace/ws-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+loki_url               = "http://loki:3100"
+loki_security_group_id = "sg-xxxxxxxxxxxxxxxxx"
+
+# -----------------------------------------------------------------------------
+# Container Images
+# -----------------------------------------------------------------------------
+temporal_dsql_image = "123456789012.dkr.ecr.eu-west-1.amazonaws.com/temporal-dsql:latest"
+copilot_image       = "123456789012.dkr.ecr.eu-west-1.amazonaws.com/temporal-sre-copilot:latest"
+
+# -----------------------------------------------------------------------------
+# Service Configuration (optional, defaults shown)
+# -----------------------------------------------------------------------------
+# temporal_cpu    = 1024
+# temporal_memory = 2048
+# worker_cpu      = 2048
+# worker_memory   = 4096
+# api_cpu         = 512
+# api_memory      = 1024
+# desired_count   = 0
+
+# -----------------------------------------------------------------------------
+# EC2 Capacity (optional, defaults shown)
+# -----------------------------------------------------------------------------
+# instance_type  = "m7g.large"
+# instance_count = 2
+
+# -----------------------------------------------------------------------------
+# Bedrock Knowledge Base (optional)
+# Create separately or leave empty
+# -----------------------------------------------------------------------------
+# knowledge_base_id = "XXXXXXXXXX"

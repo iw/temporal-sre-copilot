@@ -1,0 +1,387 @@
+{
+  "annotations": { "list": [] },
+  "description": "AI-powered health monitoring for Temporal on Aurora DSQL. Rules decide, AI explains.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": true,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": true,
+      "title": "Related Dashboards",
+      "type": "dashboards",
+      "url": ""
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "title": "",
+      "type": "text",
+      "gridPos": { "h": 7, "w": 16, "x": 0, "y": 0 },
+      "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+      "options": {
+        "mode": "html",
+        "content": "",
+        "code": { "language": "html", "showLineNumbers": false }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+          "urlPath": "/status/summary",
+          "method": "GET",
+          "cacheDurationSeconds": 0,
+          "fields": [
+            { "jsonPath": "$.health_state", "name": "health_state" },
+            { "jsonPath": "$.summary", "name": "summary" },
+            { "jsonPath": "$.timestamp", "name": "timestamp" }
+          ]
+        }
+      ],
+      "transformations": [],
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "description": "Copilot Advisor: AI-powered health summary with status badge"
+    },
+    {
+      "id": 2,
+      "title": "Status Filter",
+      "type": "stat",
+      "gridPos": { "h": 3, "w": 8, "x": 16, "y": 0 },
+      "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+      "targets": [
+        {
+          "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+          "urlPath": "/status",
+          "method": "GET",
+          "fields": [
+            { "jsonPath": "$.health_state", "name": "Health State" },
+            { "jsonPath": "$.issue_count", "name": "Issues" }
+          ]
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "/.*/" },
+        "orientation": "horizontal",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "happy": { "text": "🟢 Happy", "color": "green" } } },
+            { "type": "value", "options": { "stressed": { "text": "🟡 Stressed", "color": "yellow" } } },
+            { "type": "value", "options": { "critical": { "text": "🔴 Critical", "color": "red" } } }
+          ]
+        },
+        "overrides": []
+      },
+      "description": "Current health state"
+    },
+    {
+      "id": 3,
+      "title": "Issue Count",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 3 },
+      "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+      "targets": [
+        {
+          "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+          "urlPath": "/status",
+          "method": "GET",
+          "fields": [
+            { "jsonPath": "$.issue_count", "name": "Active Issues" }
+          ]
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "/.*/" },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 3 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "description": "Number of active issues"
+    },
+    {
+      "id": 4,
+      "title": "📊 Analysis",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 7 },
+      "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+      "targets": [
+        {
+          "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+          "urlPath": "/status/issues",
+          "method": "GET",
+          "fields": [
+            { "jsonPath": "$.issues[*].severity", "name": "Severity" },
+            { "jsonPath": "$.issues[*].title", "name": "Issue" },
+            { "jsonPath": "$.issues[*].description", "name": "Description" },
+            { "jsonPath": "$.issues[*].likely_cause", "name": "Likely Cause" }
+          ]
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "Severity", "desc": true }],
+        "cellHeight": "md"
+      },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" } } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Severity" },
+            "properties": [
+              { "id": "custom.width", "value": 80 },
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "critical": { "text": "🔴", "color": "red" } } },
+                  { "type": "value", "options": { "warning": { "text": "🟡", "color": "yellow" } } }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "description": "Active issues identified by the Copilot"
+    },
+    {
+      "id": 5,
+      "title": "💡 Suggested Remediations",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 7 },
+      "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+      "targets": [
+        {
+          "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+          "urlPath": "/status",
+          "method": "GET",
+          "fields": [
+            { "jsonPath": "$.recommended_actions[*].description", "name": "Action" },
+            { "jsonPath": "$.recommended_actions[*].confidence", "name": "Confidence" },
+            { "jsonPath": "$.recommended_actions[*].target_service", "name": "Service" },
+            { "jsonPath": "$.recommended_actions[*].risk_level", "name": "Risk" }
+          ]
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "Confidence", "desc": true }],
+        "cellHeight": "md"
+      },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Confidence" },
+            "properties": [
+              { "id": "custom.width", "value": 100 },
+              { "id": "unit", "value": "percentunit" },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "yellow", "value": null },
+                    { "color": "green", "value": 0.7 }
+                  ]
+                }
+              },
+              { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "basic" } }
+            ]
+          }
+        ]
+      },
+      "description": "AI-suggested remediation actions ranked by confidence"
+    },
+    {
+      "id": 6,
+      "title": "Signal Metrics",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+      "targets": [
+        {
+          "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+          "urlPath": "/status",
+          "method": "GET",
+          "fields": [
+            { "jsonPath": "$.primary_signals.state_transitions.throughput_per_sec", "name": "State Trans/sec" },
+            { "jsonPath": "$.primary_signals.history.backlog_age_sec", "name": "Backlog Age (s)" },
+            { "jsonPath": "$.primary_signals.workflow_completion.completion_rate", "name": "Completion Rate" },
+            { "jsonPath": "$.primary_signals.persistence.latency_p99_ms", "name": "Persistence p99 (ms)" },
+            { "jsonPath": "$.primary_signals.frontend.latency_p99_ms", "name": "Frontend p99 (ms)" },
+            { "jsonPath": "$.primary_signals.history.shard_churn_rate_per_sec", "name": "Shard Churn/sec" }
+          ]
+        }
+      ],
+      "options": { "showHeader": true, "cellHeight": "sm" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto" },
+          "decimals": 1
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Completion Rate" },
+            "properties": [{ "id": "unit", "value": "percentunit" }]
+          }
+        ]
+      },
+      "description": "Key primary signals (forward progress indicators)"
+    },
+    {
+      "id": 7,
+      "title": "Amplifier Metrics",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+      "targets": [
+        {
+          "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+          "urlPath": "/status",
+          "method": "GET",
+          "fields": [
+            { "jsonPath": "$.amplifiers.persistence.occ_conflicts_per_sec", "name": "OCC Conflicts/sec" },
+            { "jsonPath": "$.amplifiers.connection_pool.utilization_pct", "name": "Pool Util %" },
+            { "jsonPath": "$.amplifiers.connection_pool.churn_rate_per_sec", "name": "Conn Churn/sec" },
+            { "jsonPath": "$.amplifiers.queue.task_backlog_depth", "name": "Backlog Depth" },
+            { "jsonPath": "$.amplifiers.runtime.goroutines", "name": "Goroutines" },
+            { "jsonPath": "$.amplifiers.host.gc_pause_ms", "name": "GC Pause (ms)" }
+          ]
+        }
+      ],
+      "options": { "showHeader": true, "cellHeight": "sm" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" }, "decimals": 1 },
+        "overrides": []
+      },
+      "description": "Amplifier signals (explain why state changed)"
+    },
+    {
+      "id": 8,
+      "title": "Per-Service Health",
+      "type": "table",
+      "gridPos": { "h": 5, "w": 24, "x": 0, "y": 23 },
+      "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+      "targets": [
+        {
+          "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+          "urlPath": "/status/services",
+          "method": "GET",
+          "fields": [
+            { "jsonPath": "$.services[*].name", "name": "Service" },
+            { "jsonPath": "$.services[*].status", "name": "Status" }
+          ]
+        }
+      ],
+      "options": { "showHeader": true, "cellHeight": "sm" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "center" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Status" },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "happy": { "text": "🟢 Happy", "color": "green" } } },
+                  { "type": "value", "options": { "stressed": { "text": "🟡 Stressed", "color": "yellow" } } },
+                  { "type": "value", "options": { "critical": { "text": "🔴 Critical", "color": "red" } } }
+                ]
+              },
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "basic" } }
+            ]
+          }
+        ]
+      },
+      "description": "Per-service health derived from primary signals"
+    },
+    {
+      "id": 9,
+      "title": "Log Pattern Alerts",
+      "type": "table",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "amp" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "amp" },
+          "expr": "topk(10, sum by (pattern, service) (copilot_log_pattern_count))",
+          "legendFormat": "{{pattern}} ({{service}})",
+          "refId": "A"
+        }
+      ],
+      "options": { "showHeader": true, "sortBy": [{ "displayName": "Value", "desc": true }], "cellHeight": "sm" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": []
+      },
+      "description": "Narrative signals: log patterns that explain state transitions"
+    },
+    {
+      "id": 10,
+      "title": "Health Timeline",
+      "type": "state-timeline",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 34 },
+      "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+      "targets": [
+        {
+          "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+          "urlPath": "/status/timeline",
+          "method": "GET",
+          "fields": [
+            { "jsonPath": "$.timeline[*].timestamp", "name": "Time", "type": "time" },
+            { "jsonPath": "$.timeline[*].health_state", "name": "Health State" }
+          ]
+        }
+      ],
+      "options": {
+        "showValue": "auto",
+        "rowHeight": 0.9,
+        "mergeValues": true,
+        "alignValue": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 80 },
+          "mappings": [
+            { "type": "value", "options": { "happy": { "text": "Happy", "color": "green" } } },
+            { "type": "value", "options": { "stressed": { "text": "Stressed", "color": "yellow" } } },
+            { "type": "value", "options": { "critical": { "text": "Critical", "color": "red" } } }
+          ]
+        },
+        "overrides": []
+      },
+      "description": "Health state changes over time"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["copilot", "temporal", "sre", "ai"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "utc",
+  "title": "Temporal SRE Copilot",
+  "uid": "temporal-sre-copilot",
+  "version": 1
+}

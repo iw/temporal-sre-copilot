@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Safe Commit & Push",
+  "description": "Reviews changes for sensitive data (AWS account IDs, resource IDs, keys, secrets), generates a concise commit message, and pushes to remote.",
+  "version": "1",
+  "when": {
+    "type": "userTriggered"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Perform a safe commit and push:\n\n1. Run `git status` and `git diff --staged` (or `git diff` if nothing staged) to review changes\n2. Scan ALL changed files for sensitive data patterns:\n   - AWS Account IDs (12-digit numbers, especially in ARNs)\n   - Resource IDs (vpc-xxx, subnet-xxx, sg-xxx, i-xxx, arn:aws:...)\n   - API keys, secrets, tokens (look for key=, secret=, token=, password=)\n   - IP addresses, endpoints that look internal\n   - Any hardcoded credentials\n3. If sensitive data found: STOP and report what was found, do NOT commit\n4. If clean: Stage all changes, create a concise commit message (single line, under 72 chars, no special characters that need escaping), commit and push\n5. Keep terminal output minimal - avoid commands that produce excessive output"
+  }
+}

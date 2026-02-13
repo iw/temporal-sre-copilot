@@ -1,0 +1,41 @@
+# -----------------------------------------------------------------------------
+# Temporal SRE Copilot - Dev Environment
+# -----------------------------------------------------------------------------
+# Cost-optimized for development/iteration. Single t4g.medium instance,
+# halved CPU/memory, 3-day log retention.
+#
+# To get values from temporal-dsql-deploy-ecs:
+#   cd ../temporal-dsql-deploy-ecs/terraform/envs/dev
+#   terraform output
+# -----------------------------------------------------------------------------
+
+project_name = "temporal-dev"
+aws_region   = "eu-west-1"
+
+# VPC
+vpc_id             = "vpc-xxxxxxxxxxxxxxxxx"
+private_subnet_ids = ["subnet-xxxxxxxxxxxxxxxxx", "subnet-xxxxxxxxxxxxxxxxx"]
+vpc_cidr           = "10.0.0.0/16"
+
+# DSQL
+dsql_endpoint    = "xxxxxxxxxxxxxxxxx.dsql.eu-west-1.on.aws"
+dsql_cluster_arn = "arn:aws:dsql:eu-west-1:123456789012:cluster/xxxxxxxxxxxxxxxxx"
+dsql_database    = "copilot"
+
+# Observability
+amp_workspace_id       = "ws-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+amp_workspace_arn      = "arn:aws:aps:eu-west-1:123456789012:workspace/ws-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+loki_url               = "http://loki:3100"
+loki_security_group_id = "sg-xxxxxxxxxxxxxxxxx"
+
+# Container images
+temporal_dsql_image = "123456789012.dkr.ecr.eu-west-1.amazonaws.com/temporal-dsql:latest"
+copilot_image       = "123456789012.dkr.ecr.eu-west-1.amazonaws.com/temporal-sre-copilot:latest"
+
+# All other defaults are cost-optimized:
+#   instance_type  = "t4g.medium"   (vs m7g.large in bench)
+#   instance_count = 1              (vs 2 in bench)
+#   temporal:  512 CPU / 1024 MiB   (vs 1024/2048)
+#   worker:    1024 CPU / 2048 MiB  (vs 2048/4096)
+#   api:       256 CPU / 512 MiB    (vs 512/1024)
+#   logs:      3 days               (vs 7 days)
