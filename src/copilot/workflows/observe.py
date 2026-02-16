@@ -54,6 +54,7 @@ class ObserveClusterWorkflow:
         self._reconciled = False
         self._signal_window: list[Signals] = []
         self._window_size = 10  # Keep last 10 signal snapshots (5 minutes)
+        self._consecutive_critical_count = 0  # Debounce counter for Critical transitions
 
     @workflow.run
     async def run(self, input: ObserveClusterInput) -> None:
@@ -90,9 +91,10 @@ class ObserveClusterWorkflow:
                     self._signal_window.pop(0)
 
                 # DETERMINISTIC: Evaluate health state (no LLM)
-                new_state = evaluate_health_state(
+                new_state, self._consecutive_critical_count = evaluate_health_state(
                     signals.primary,
                     self._current_state,
+                    consecutive_critical_count=self._consecutive_critical_count,
                 )
 
                 # Trigger assessment if state changed

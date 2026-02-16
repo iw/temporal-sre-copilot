@@ -18,39 +18,67 @@ class CriticalThresholds(BaseModel):
 
     CRITICAL if forward progress collapses:
     - Signal 1: State transition throughput drops
-    - Signal 3: Workflow completion rate drops
+    - Signal 3: Workflow completion rate drops (demand-gated)
     - Signal 4: History backlog age exceeds critical
     - Signal 5: History processing rate drops
     """
 
     # Signal 1: State transition throughput
     state_transitions_min_per_sec: float = Field(
-        default=10.0,
-        description="Below this, forward progress has collapsed",
+        default=5.0,
+        description=(
+            "Below this, forward progress has collapsed. "
+            "Set conservatively low to avoid false Critical during ramp-up/down."
+        ),
     )
 
     # Signal 3: Workflow completion rate
     workflow_completion_rate_min: float = Field(
-        default=0.5,
-        description="Below this, workflows are failing at alarming rate",
+        default=0.3,
+        description=(
+            "Below this, workflows are failing at alarming rate. "
+            "Only evaluated when demand exceeds completion_rate_demand_floor_per_sec."
+        ),
+    )
+
+    # Signal 3 demand gate: completion rate is only meaningful when
+    # there's enough terminal throughput to form a reliable ratio.
+    completion_rate_demand_floor_per_sec: float = Field(
+        default=5.0,
+        description=(
+            "Minimum terminal workflow throughput (success + failed) before "
+            "completion_rate is evaluated. Prevents false Critical during "
+            "ramp-up when completions naturally lag behind starts."
+        ),
     )
 
     # Signal 4: History backlog age
     history_backlog_age_max_sec: float = Field(
-        default=120.0,
-        description="Above this, execution engine is critically behind",
+        default=300.0,
+        description=(
+            "Above this, execution engine is critically behind. "
+            "Set to 5 minutes — a 2-minute threshold was too eager "
+            "during load test ramp-up and DSQL latency spikes."
+        ),
     )
 
     # Signal 5: History processing rate
     history_processing_rate_min_per_sec: float = Field(
-        default=10.0,
-        description="Below this with steady demand, capacity exhausted",
+        default=5.0,
+        description=(
+            "Below this with steady demand, capacity exhausted. "
+            "Set conservatively low to avoid false Critical during ramp transitions."
+        ),
     )
 
     # Signal 12: Persistence error rate
     persistence_error_rate_max_per_sec: float = Field(
-        default=10.0,
-        description="Above this, persistence is failing not just slow",
+        default=50.0,
+        description=(
+            "Above this, persistence is failing not just slow. "
+            "Set high because OCC retries during contention can easily "
+            "spike above 10/sec transiently without impacting progress."
+        ),
     )
 
 
@@ -102,24 +130,41 @@ class StressedThresholds(BaseModel):
 
 
 class HealthyThresholds(BaseModel):
-    """Thresholds for HAPPY state (all must be met)."""
+    """Thresholds for HAPPY state (all must be met).
+
+    These are deliberately set low to avoid the "perpetually STRESSED" trap.
+    A cluster running at 20 WPS with 90% completion is healthy — the old
+    thresholds (50 st/sec, 95% completion) would have kept it in STRESSED
+    permanently, making it one transient spike away from Critical.
+    """
 
     # Signal 1: State transition throughput
     state_transitions_healthy_per_sec: float = Field(
-        default=50.0,
-        description="Above this, forward progress is healthy",
+        default=10.0,
+        description=(
+            "Above this, forward progress is healthy. "
+            "Set to match the critical floor — if you're above critical, "
+            "and other gates pass, you're healthy."
+        ),
     )
 
     # Signal 4: History backlog age
     history_backlog_age_healthy_sec: float = Field(
-        default=10.0,
-        description="Below this, execution engine is keeping up",
+        default=30.0,
+        description=(
+            "Below this, execution engine is keeping up. "
+            "Relaxed from 10s — some backlog is normal under load."
+        ),
     )
 
     # Signal 3: Workflow completion rate
     workflow_completion_rate_healthy: float = Field(
-        default=0.95,
-        description="Above this, workflows completing normally",
+        default=0.85,
+        description=(
+            "Above this, workflows completing normally. "
+            "Relaxed from 0.95 — a 90% completion rate with retries "
+            "is healthy for many workloads."
+        ),
     )
 
 

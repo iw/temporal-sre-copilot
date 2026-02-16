@@ -24,6 +24,12 @@ Signal Reference:
 12. Persistence error/retry rate
 
 INVARIANT: Happy → Critical transition MUST go through Stressed.
+
+Anti-flap Design:
+- Critical requires sustained conditions (consecutive_critical_threshold)
+- Recovery from Critical requires signals to clear a hysteresis band
+- Completion rate gate only fires when there's meaningful demand
+- Healthy thresholds are workload-relative, not absolute
 """
 
 from .config import CriticalThresholds, HealthyThresholds, StressedThresholds
@@ -34,6 +40,10 @@ from .signals import (
     WorkerSignals,
 )
 
+# How many consecutive evaluations must show Critical before we transition.
+# At 30s observation intervals, 3 consecutive = 90 seconds of sustained failure.
+CONSECUTIVE_CRITICAL_THRESHOLD = 3
+
 
 def evaluate_health_state(
     primary: PrimarySignals,
@@ -41,7 +51,9 @@ def evaluate_health_state(
     critical: CriticalThresholds | None = None,
     stressed: StressedThresholds | None = None,
     healthy: HealthyThresholds | None = None,
-) -> HealthState:
+    *,
+    consecutive_critical_count: int = 0,
+) -> tuple[HealthState, int]:
     """Evaluate health state from signals using deterministic rules.
 
     This function is the core of the Health State Machine.
@@ -53,9 +65,12 @@ def evaluate_health_state(
         critical: Thresholds for CRITICAL state
         stressed: Thresholds for STRESSED state
         healthy: Thresholds for HAPPY state
+        consecutive_critical_count: How many consecutive evaluations have
+            triggered critical gates. Caller must track and pass this in.
 
     Returns:
-        New health state based on forward progress invariant
+        Tuple of (new health state, updated consecutive critical count).
+        The caller must persist the count for the next evaluation.
     """
     if critical is None:
         critical = CriticalThresholds()
@@ -67,22 +82,38 @@ def evaluate_health_state(
     # Idle cluster detection: zero throughput with zero errors/backlog
     # means no work is being submitted — not that something is broken.
     if _is_idle(primary):
-        return HealthState.HAPPY
+        return HealthState.HAPPY, 0
 
     # Check CRITICAL gates first (any one triggers)
     if _is_critical(primary, critical):
-        return _apply_transition_invariant(current_state, HealthState.CRITICAL)
+        new_count = consecutive_critical_count + 1
+
+        if new_count >= CONSECUTIVE_CRITICAL_THRESHOLD:
+            # Sustained critical — transition (with invariant applied)
+            return _apply_transition_invariant(current_state, HealthState.CRITICAL), new_count
+
+        # Not yet sustained — report STRESSED as early warning, carry the count
+        return _apply_transition_invariant(current_state, HealthState.STRESSED), new_count
+
+    # Critical gates not triggered — reset the counter
+    new_count = 0
+
+    # Recovery hysteresis: when currently CRITICAL, require signals to be
+    # clearly better than the stressed threshold before recovering.
+    # This prevents flapping at the Critical/Stressed boundary.
+    if current_state == HealthState.CRITICAL and _is_near_critical(primary, critical):
+        return HealthState.STRESSED, new_count
 
     # Check STRESSED gates (trending wrong)
     if _is_stressed(primary, stressed):
-        return HealthState.STRESSED
+        return HealthState.STRESSED, new_count
 
     # Check HAPPY gates (all must pass)
     if _is_healthy(primary, healthy):
-        return HealthState.HAPPY
+        return HealthState.HAPPY, new_count
 
     # Default to STRESSED if between thresholds
-    return HealthState.STRESSED
+    return HealthState.STRESSED, new_count
 
 
 def _is_idle(primary: PrimarySignals) -> bool:
@@ -123,7 +154,7 @@ def _is_critical(
 
     CRITICAL if forward progress collapses:
     - Signal 1: State transition throughput drops below minimum
-    - Signal 3: Workflow completion rate drops below minimum
+    - Signal 3: Workflow completion rate drops below minimum (demand-gated)
     - Signal 4: History backlog age exceeds critical threshold
     - Signal 5: History processing rate drops below minimum
     - Signal 12: Persistence error rate exceeds maximum
@@ -132,8 +163,18 @@ def _is_critical(
     if primary.state_transitions.throughput_per_sec < thresholds.state_transitions_min_per_sec:
         return True
 
-    # Signal 3: Workflow completion rate collapsed
-    if primary.workflow_completion.completion_rate < thresholds.workflow_completion_rate_min:
+    # Signal 3: Workflow completion rate collapsed — but only when there's
+    # meaningful demand. During ramp-up, completions lag behind starts by
+    # design. We require at least some completions+failures flowing before
+    # treating a low ratio as a real problem.
+    total_terminal = (
+        primary.workflow_completion.success_per_sec
+        + primary.workflow_completion.failed_per_sec
+    )
+    if (
+        total_terminal >= thresholds.completion_rate_demand_floor_per_sec
+        and primary.workflow_completion.completion_rate < thresholds.workflow_completion_rate_min
+    ):
         return True
 
     # Signal 4: History backlog age critical
@@ -149,6 +190,37 @@ def _is_critical(
 
     # Signal 12: Persistence failing (not just slow)
     return primary.persistence.error_rate_per_sec > thresholds.persistence_error_rate_max_per_sec
+
+
+def _is_near_critical(
+    primary: PrimarySignals,
+    thresholds: CriticalThresholds,
+) -> bool:
+    """Check if signals are near critical thresholds (hysteresis band).
+
+    When recovering from CRITICAL, we require signals to clear a margin
+    above/below the critical thresholds before downgrading to STRESSED.
+    This prevents flapping at the boundary.
+
+    The margin is 50% of the distance between the threshold and a
+    "clearly safe" value.
+    """
+    # Throughput: must be at least 50% above the critical floor
+    if primary.state_transitions.throughput_per_sec < thresholds.state_transitions_min_per_sec * 1.5:
+        return True
+
+    # Backlog age: must be at least 25% below the critical ceiling
+    if primary.history.backlog_age_sec > thresholds.history_backlog_age_max_sec * 0.75:
+        return True
+
+    # Processing rate: must be at least 50% above the critical floor
+    if (
+        primary.history.task_processing_rate_per_sec
+        < thresholds.history_processing_rate_min_per_sec * 1.5
+    ):
+        return True
+
+    return False
 
 
 def _is_stressed(
