@@ -50,3 +50,29 @@ CREATE TABLE IF NOT EXISTS metrics_snapshots (
 );
 
 CREATE INDEX ASYNC idx_snapshots_timestamp ON metrics_snapshots(timestamp);
+
+-- ---------------------------------------------------------------------------
+-- Behaviour Profiles — metadata index (full JSON stored in S3)
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS behaviour_profiles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    label VARCHAR(255),
+    cluster_id VARCHAR(255) NOT NULL,
+    namespace VARCHAR(255),
+    task_queue VARCHAR(255),
+    time_window_start TIMESTAMPTZ NOT NULL,
+    time_window_end TIMESTAMPTZ NOT NULL,
+    s3_key VARCHAR(1024) NOT NULL,
+    is_baseline BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ASYNC idx_profiles_cluster ON behaviour_profiles(cluster_id);
+
+CREATE INDEX ASYNC idx_profiles_label ON behaviour_profiles(label);
+
+CREATE INDEX ASYNC idx_profiles_created ON behaviour_profiles(created_at);
+
+CREATE INDEX ASYNC idx_profiles_baseline ON behaviour_profiles(cluster_id, namespace, is_baseline);

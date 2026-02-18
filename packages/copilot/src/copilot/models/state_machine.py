@@ -168,8 +168,7 @@ def _is_critical(
     # design. We require at least some completions+failures flowing before
     # treating a low ratio as a real problem.
     total_terminal = (
-        primary.workflow_completion.success_per_sec
-        + primary.workflow_completion.failed_per_sec
+        primary.workflow_completion.success_per_sec + primary.workflow_completion.failed_per_sec
     )
     if (
         total_terminal >= thresholds.completion_rate_demand_floor_per_sec
@@ -206,7 +205,10 @@ def _is_near_critical(
     "clearly safe" value.
     """
     # Throughput: must be at least 50% above the critical floor
-    if primary.state_transitions.throughput_per_sec < thresholds.state_transitions_min_per_sec * 1.5:
+    if (
+        primary.state_transitions.throughput_per_sec
+        < thresholds.state_transitions_min_per_sec * 1.5
+    ):
         return True
 
     # Backlog age: must be at least 25% below the critical ceiling
@@ -214,13 +216,10 @@ def _is_near_critical(
         return True
 
     # Processing rate: must be at least 50% above the critical floor
-    if (
+    return (
         primary.history.task_processing_rate_per_sec
         < thresholds.history_processing_rate_min_per_sec * 1.5
-    ):
-        return True
-
-    return False
+    )
 
 
 def _is_stressed(

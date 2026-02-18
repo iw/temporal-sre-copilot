@@ -19,6 +19,8 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from whenever import Instant, TimeDelta
 
+from behaviour_profiles.api import configure_profile_router
+from behaviour_profiles.api import router as profile_router
 from copilot.models import (
     ErrorResponse,
     IssueResponse,
@@ -340,6 +342,27 @@ async def lifespan(app: FastAPI):
     global _pool
     try:
         _pool = await _create_pool()
+
+        # Configure behaviour profile router if S3 bucket and AMP endpoint are set
+        s3_bucket = os.environ.get("COPILOT_PROFILE_S3_BUCKET")
+        amp_endpoint = os.environ.get("AMP_ENDPOINT")
+        if s3_bucket and amp_endpoint and _pool:
+            try:
+                import aiobotocore.session
+
+                from behaviour_profiles.storage import ProfileStorage
+
+                session = aiobotocore.session.get_session()
+                s3_ctx = session.create_client("s3")
+                s3_client = await s3_ctx.__aenter__()
+                configure_profile_router(
+                    storage=ProfileStorage(pool=_pool, s3_client=s3_client, bucket=s3_bucket),
+                    amp_endpoint=amp_endpoint,
+                )
+                logger.info("Behaviour profile API configured (bucket=%s)", s3_bucket)
+            except Exception:
+                logger.warning("Failed to configure profile API", exc_info=True)
+
         yield
     except Exception:
         logger.exception("Failed to create DSQL pool")
@@ -363,6 +386,9 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+# Mount behaviour profile API router
+app.include_router(profile_router)
 
 
 async def _get_pool_or_503() -> asyncpg.Pool:

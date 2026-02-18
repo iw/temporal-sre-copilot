@@ -1,0 +1,20 @@
+[project]
+name = "copilot-core"
+version = "0.1.0"
+description = "Shared types, signal definitions, and common utilities for the Temporal SRE Copilot workspace"
+requires-python = ">=3.14"
+dependencies = [
+    "pydantic>=2.11",
+    "packaging>=24.0",
+    "whenever>=0.9.5",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.28,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv]
+package = true
+
+[tool.uv.build-backend]
+module-name = "copilot_core"

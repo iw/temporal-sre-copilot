@@ -20,6 +20,20 @@ from copilot.models import (
     ScheduledAssessmentInput,
 )
 from copilot.workflows.assess import AssessHealthWorkflow
+from copilot.workflows.conformance import (
+    ConformanceAssessment,
+    MetricConformance,
+    assess_conformance,
+)
+from copilot.workflows.drift import (
+    CorrelationAssessment,
+    DriftAssessment,
+    DriftCorrelation,
+    DriftResult,
+    DriftThresholds,
+    correlate_drift,
+    detect_drift,
+)
 from copilot.workflows.log_watcher import LogWatcherWorkflow
 from copilot.workflows.observe import ObserveClusterWorkflow
 from copilot.workflows.scheduled import ScheduledAssessmentWorkflow
@@ -30,6 +44,18 @@ __all__ = [
     "LogWatcherWorkflow",
     "AssessHealthWorkflow",
     "ScheduledAssessmentWorkflow",
+    # Drift Detection
+    "detect_drift",
+    "correlate_drift",
+    "DriftAssessment",
+    "DriftResult",
+    "DriftThresholds",
+    "CorrelationAssessment",
+    "DriftCorrelation",
+    # Conformance Assessment
+    "assess_conformance",
+    "ConformanceAssessment",
+    "MetricConformance",
     # Workflow Inputs
     "ObserveClusterInput",
     "LogWatcherInput",

@@ -25,23 +25,28 @@ _cov *args:
 # Run linters
 [group('qa')]
 lint:
-    uvx ruff check
-    uvx ruff format --check
+    uvx ruff check packages tests
+    uvx ruff format --check packages tests
 
 # Format code
 [group('qa')]
 fmt:
-    uvx ruff check --fix
-    uvx ruff format
+    uvx ruff check --fix packages tests
+    uvx ruff format packages tests
 
 # Check types
 [group('qa')]
 typing:
-    uvx ty check --python .venv src
+    uvx ty check --python .venv packages
 
 # Perform all checks
 [group('qa')]
 check-all: lint test typing
+
+# Run the config compiler CLI
+[group('tools')]
+config *args:
+    uv run temporal-dsql-config {{ args }}
 
 # Update dependencies
 [group('lifecycle')]

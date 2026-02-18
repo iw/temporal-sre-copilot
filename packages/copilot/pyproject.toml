@@ -1,0 +1,41 @@
+[project]
+name = "temporal-sre-copilot"
+version = "0.1.0"
+description = "AI-powered observability agent for Temporal deployments on Aurora DSQL"
+requires-python = ">=3.14"
+dependencies = [
+    "copilot-core",
+    "dsql-config",
+    "behaviour-profiles",
+    "pydantic>=2.11",
+    "pydantic-ai>=1.58",
+    "pydantic-settings>=2.10",
+    "temporalio>=1.20",
+    "fastapi>=0.115",
+    "uvicorn>=0.34",
+    "httpx>=0.28",
+    "boto3>=1.36",
+    "asyncpg>=0.30",
+    "aurora-dsql-python-connector",
+    "typer>=0.15",
+    "rich>=13.9",
+    "whenever>=0.9.5",
+]
+
+[project.scripts]
+copilot = "copilot.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.9.28,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv]
+package = true
+
+[tool.uv.build-backend]
+module-name = "copilot"
+
+[tool.uv.sources]
+copilot-core = { workspace = true }
+dsql-config = { workspace = true }
+behaviour-profiles = { workspace = true }

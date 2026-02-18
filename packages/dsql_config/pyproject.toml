@@ -1,0 +1,36 @@
+[project]
+name = "dsql-config"
+version = "0.1.0"
+description = "Configuration compiler and generators for Temporal DSQL deployments"
+requires-python = ">=3.14"
+dependencies = [
+    "copilot-core",
+    "pydantic>=2.11",
+    "typer>=0.15",
+    "rich>=13.9",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+temporal-dsql-config = "dsql_config.cli:app"
+
+[project.entry-points."temporal_dsql.sdk_adapters"]
+go = "dsql_config.adapters.go_sdk:GoSDKAdapter"
+python = "dsql_config.adapters.python_sdk:PythonSDKAdapter"
+
+[project.entry-points."temporal_dsql.platform_adapters"]
+ecs = "dsql_config.adapters.ecs:ECSAdapter"
+compose = "dsql_config.adapters.compose:ComposeAdapter"
+
+[build-system]
+requires = ["uv_build>=0.9.28,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv]
+package = true
+
+[tool.uv.build-backend]
+module-name = "dsql_config"
+
+[tool.uv.sources]
+copilot-core = { workspace = true }

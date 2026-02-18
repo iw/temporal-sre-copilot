@@ -19,12 +19,25 @@ from .strategies import health_states, primary_signals
 def _healthy_signals():
     return PrimarySignals(
         state_transitions={"throughput_per_sec": 200, "latency_p95_ms": 10, "latency_p99_ms": 20},
-        workflow_completion={"completion_rate": 0.99, "success_per_sec": 100, "failed_per_sec": 0.1},
-        history={"backlog_age_sec": 1, "task_processing_rate_per_sec": 200, "shard_churn_rate_per_sec": 0},
+        workflow_completion={
+            "completion_rate": 0.99,
+            "success_per_sec": 100,
+            "failed_per_sec": 0.1,
+        },
+        history={
+            "backlog_age_sec": 1,
+            "task_processing_rate_per_sec": 200,
+            "shard_churn_rate_per_sec": 0,
+        },
         frontend={"error_rate_per_sec": 0, "latency_p95_ms": 50, "latency_p99_ms": 80},
         matching={"workflow_backlog_age_sec": 0, "activity_backlog_age_sec": 0},
         poller={"poll_success_rate": 0.99, "poll_timeout_rate": 0.01, "long_poll_latency_ms": 10},
-        persistence={"latency_p95_ms": 10, "latency_p99_ms": 20, "error_rate_per_sec": 0, "retry_rate_per_sec": 0},
+        persistence={
+            "latency_p95_ms": 10,
+            "latency_p99_ms": 20,
+            "error_rate_per_sec": 0,
+            "retry_rate_per_sec": 0,
+        },
     )
 
 
@@ -33,11 +46,20 @@ def _critical_throughput_signals():
     return PrimarySignals(
         state_transitions={"throughput_per_sec": 1, "latency_p95_ms": 10, "latency_p99_ms": 20},
         workflow_completion={"completion_rate": 0.99, "success_per_sec": 100, "failed_per_sec": 0},
-        history={"backlog_age_sec": 1, "task_processing_rate_per_sec": 200, "shard_churn_rate_per_sec": 0},
+        history={
+            "backlog_age_sec": 1,
+            "task_processing_rate_per_sec": 200,
+            "shard_churn_rate_per_sec": 0,
+        },
         frontend={"error_rate_per_sec": 0, "latency_p95_ms": 50, "latency_p99_ms": 80},
         matching={"workflow_backlog_age_sec": 0, "activity_backlog_age_sec": 0},
         poller={"poll_success_rate": 0.99, "poll_timeout_rate": 0.01, "long_poll_latency_ms": 10},
-        persistence={"latency_p95_ms": 10, "latency_p99_ms": 20, "error_rate_per_sec": 0, "retry_rate_per_sec": 0},
+        persistence={
+            "latency_p95_ms": 10,
+            "latency_p99_ms": 20,
+            "error_rate_per_sec": 0,
+            "retry_rate_per_sec": 0,
+        },
     )
 
 
@@ -45,11 +67,20 @@ def _idle_signals():
     return PrimarySignals(
         state_transitions={"throughput_per_sec": 0, "latency_p95_ms": 0, "latency_p99_ms": 0},
         workflow_completion={"completion_rate": 1.0, "success_per_sec": 0, "failed_per_sec": 0},
-        history={"backlog_age_sec": 0, "task_processing_rate_per_sec": 0, "shard_churn_rate_per_sec": 0},
+        history={
+            "backlog_age_sec": 0,
+            "task_processing_rate_per_sec": 0,
+            "shard_churn_rate_per_sec": 0,
+        },
         frontend={"error_rate_per_sec": 0, "latency_p95_ms": 0, "latency_p99_ms": 0},
         matching={"workflow_backlog_age_sec": 0, "activity_backlog_age_sec": 0},
         poller={"poll_success_rate": 1.0, "poll_timeout_rate": 0, "long_poll_latency_ms": 0},
-        persistence={"latency_p95_ms": 0, "latency_p99_ms": 0, "error_rate_per_sec": 0, "retry_rate_per_sec": 0},
+        persistence={
+            "latency_p95_ms": 0,
+            "latency_p99_ms": 0,
+            "error_rate_per_sec": 0,
+            "retry_rate_per_sec": 0,
+        },
     )
 
 
@@ -69,7 +100,8 @@ def test_no_direct_happy_to_critical(signals: PrimarySignals):
 def test_no_direct_happy_to_critical_even_with_sustained(signals: PrimarySignals):
     """Even with max consecutive critical count, HAPPY never goes to CRITICAL."""
     result, _ = evaluate_health_state(
-        signals, HealthState.HAPPY,
+        signals,
+        HealthState.HAPPY,
         consecutive_critical_count=CONSECUTIVE_CRITICAL_THRESHOLD + 10,
     )
     assert result != HealthState.CRITICAL
@@ -80,7 +112,8 @@ def test_no_direct_happy_to_critical_even_with_sustained(signals: PrimarySignals
 def test_stressed_can_reach_critical(signals: PrimarySignals):
     """From STRESSED with sustained critical, all three states are reachable."""
     result, _ = evaluate_health_state(
-        signals, HealthState.STRESSED,
+        signals,
+        HealthState.STRESSED,
         consecutive_critical_count=CONSECUTIVE_CRITICAL_THRESHOLD,
     )
     assert result in (HealthState.HAPPY, HealthState.STRESSED, HealthState.CRITICAL)
@@ -134,11 +167,20 @@ def test_collapsed_throughput_not_happy(current_state: HealthState):
     collapsed = PrimarySignals(
         state_transitions={"throughput_per_sec": 0, "latency_p95_ms": 10, "latency_p99_ms": 20},
         workflow_completion={"completion_rate": 0.99, "success_per_sec": 100, "failed_per_sec": 0},
-        history={"backlog_age_sec": 1, "task_processing_rate_per_sec": 200, "shard_churn_rate_per_sec": 0},
+        history={
+            "backlog_age_sec": 1,
+            "task_processing_rate_per_sec": 200,
+            "shard_churn_rate_per_sec": 0,
+        },
         frontend={"error_rate_per_sec": 0, "latency_p95_ms": 50, "latency_p99_ms": 80},
         matching={"workflow_backlog_age_sec": 0, "activity_backlog_age_sec": 0},
         poller={"poll_success_rate": 0.99, "poll_timeout_rate": 0.01, "long_poll_latency_ms": 10},
-        persistence={"latency_p95_ms": 10, "latency_p99_ms": 20, "error_rate_per_sec": 0, "retry_rate_per_sec": 0},
+        persistence={
+            "latency_p95_ms": 10,
+            "latency_p99_ms": 20,
+            "error_rate_per_sec": 0,
+            "retry_rate_per_sec": 0,
+        },
     )
     result, _ = evaluate_health_state(collapsed, current_state)
     assert result != HealthState.HAPPY
@@ -151,11 +193,20 @@ def test_critical_backlog_not_happy(current_state: HealthState):
     signals = PrimarySignals(
         state_transitions={"throughput_per_sec": 200, "latency_p95_ms": 10, "latency_p99_ms": 20},
         workflow_completion={"completion_rate": 0.99, "success_per_sec": 100, "failed_per_sec": 0},
-        history={"backlog_age_sec": 400, "task_processing_rate_per_sec": 200, "shard_churn_rate_per_sec": 0},
+        history={
+            "backlog_age_sec": 400,
+            "task_processing_rate_per_sec": 200,
+            "shard_churn_rate_per_sec": 0,
+        },
         frontend={"error_rate_per_sec": 0, "latency_p95_ms": 50, "latency_p99_ms": 80},
         matching={"workflow_backlog_age_sec": 0, "activity_backlog_age_sec": 0},
         poller={"poll_success_rate": 0.99, "poll_timeout_rate": 0.01, "long_poll_latency_ms": 10},
-        persistence={"latency_p95_ms": 10, "latency_p99_ms": 20, "error_rate_per_sec": 0, "retry_rate_per_sec": 0},
+        persistence={
+            "latency_p95_ms": 10,
+            "latency_p99_ms": 20,
+            "error_rate_per_sec": 0,
+            "retry_rate_per_sec": 0,
+        },
     )
     result, _ = evaluate_health_state(signals, current_state)
     assert result != HealthState.HAPPY
@@ -193,11 +244,20 @@ def test_idle_detection_requires_no_errors():
     signals = PrimarySignals(
         state_transitions={"throughput_per_sec": 0, "latency_p95_ms": 0, "latency_p99_ms": 0},
         workflow_completion={"completion_rate": 0.5, "success_per_sec": 0, "failed_per_sec": 5},
-        history={"backlog_age_sec": 0, "task_processing_rate_per_sec": 0, "shard_churn_rate_per_sec": 0},
+        history={
+            "backlog_age_sec": 0,
+            "task_processing_rate_per_sec": 0,
+            "shard_churn_rate_per_sec": 0,
+        },
         frontend={"error_rate_per_sec": 0, "latency_p95_ms": 0, "latency_p99_ms": 0},
         matching={"workflow_backlog_age_sec": 0, "activity_backlog_age_sec": 0},
         poller={"poll_success_rate": 1.0, "poll_timeout_rate": 0, "long_poll_latency_ms": 0},
-        persistence={"latency_p95_ms": 0, "latency_p99_ms": 0, "error_rate_per_sec": 0, "retry_rate_per_sec": 0},
+        persistence={
+            "latency_p95_ms": 0,
+            "latency_p99_ms": 0,
+            "error_rate_per_sec": 0,
+            "retry_rate_per_sec": 0,
+        },
     )
     assert not _is_idle(signals)
 
@@ -207,11 +267,20 @@ def test_idle_detection_requires_no_backlog():
     signals = PrimarySignals(
         state_transitions={"throughput_per_sec": 0, "latency_p95_ms": 0, "latency_p99_ms": 0},
         workflow_completion={"completion_rate": 1.0, "success_per_sec": 0, "failed_per_sec": 0},
-        history={"backlog_age_sec": 60, "task_processing_rate_per_sec": 0, "shard_churn_rate_per_sec": 0},
+        history={
+            "backlog_age_sec": 60,
+            "task_processing_rate_per_sec": 0,
+            "shard_churn_rate_per_sec": 0,
+        },
         frontend={"error_rate_per_sec": 0, "latency_p95_ms": 0, "latency_p99_ms": 0},
         matching={"workflow_backlog_age_sec": 0, "activity_backlog_age_sec": 0},
         poller={"poll_success_rate": 1.0, "poll_timeout_rate": 0, "long_poll_latency_ms": 0},
-        persistence={"latency_p95_ms": 0, "latency_p99_ms": 0, "error_rate_per_sec": 0, "retry_rate_per_sec": 0},
+        persistence={
+            "latency_p95_ms": 0,
+            "latency_p99_ms": 0,
+            "error_rate_per_sec": 0,
+            "retry_rate_per_sec": 0,
+        },
     )
     assert not _is_idle(signals)
 
@@ -221,11 +290,20 @@ def test_idle_detection_near_zero_noise():
     signals = PrimarySignals(
         state_transitions={"throughput_per_sec": 0.001, "latency_p95_ms": 0, "latency_p99_ms": 0},
         workflow_completion={"completion_rate": 1.0, "success_per_sec": 0, "failed_per_sec": 0.001},
-        history={"backlog_age_sec": 0.01, "task_processing_rate_per_sec": 0.001, "shard_churn_rate_per_sec": 0},
+        history={
+            "backlog_age_sec": 0.01,
+            "task_processing_rate_per_sec": 0.001,
+            "shard_churn_rate_per_sec": 0,
+        },
         frontend={"error_rate_per_sec": 0.001, "latency_p95_ms": 0, "latency_p99_ms": 0},
         matching={"workflow_backlog_age_sec": 0, "activity_backlog_age_sec": 0},
         poller={"poll_success_rate": 1.0, "poll_timeout_rate": 0, "long_poll_latency_ms": 0},
-        persistence={"latency_p95_ms": 0, "latency_p99_ms": 0, "error_rate_per_sec": 0, "retry_rate_per_sec": 0},
+        persistence={
+            "latency_p95_ms": 0,
+            "latency_p99_ms": 0,
+            "error_rate_per_sec": 0,
+            "retry_rate_per_sec": 0,
+        },
     )
     assert _is_idle(signals)
 
@@ -236,7 +314,9 @@ def test_idle_detection_near_zero_noise():
 def test_single_critical_observation_stays_stressed():
     """A single critical observation from STRESSED stays STRESSED (debounce)."""
     result, count = evaluate_health_state(
-        _critical_throughput_signals(), HealthState.STRESSED, consecutive_critical_count=0,
+        _critical_throughput_signals(),
+        HealthState.STRESSED,
+        consecutive_critical_count=0,
     )
     assert result == HealthState.STRESSED
     assert count == 1
@@ -248,7 +328,9 @@ def test_sustained_critical_triggers_critical():
     state = HealthState.STRESSED
     for _ in range(CONSECUTIVE_CRITICAL_THRESHOLD):
         state, count = evaluate_health_state(
-            _critical_throughput_signals(), state, consecutive_critical_count=count,
+            _critical_throughput_signals(),
+            state,
+            consecutive_critical_count=count,
         )
     assert state == HealthState.CRITICAL
 
@@ -257,16 +339,22 @@ def test_transient_spike_resets_counter():
     """A good observation between bad ones resets the critical counter."""
     state = HealthState.STRESSED
     state, count = evaluate_health_state(
-        _critical_throughput_signals(), state, consecutive_critical_count=0,
+        _critical_throughput_signals(),
+        state,
+        consecutive_critical_count=0,
     )
     state, count = evaluate_health_state(
-        _critical_throughput_signals(), state, consecutive_critical_count=count,
+        _critical_throughput_signals(),
+        state,
+        consecutive_critical_count=count,
     )
     assert count == 2
 
     # One good observation resets
     state, count = evaluate_health_state(
-        _healthy_signals(), state, consecutive_critical_count=count,
+        _healthy_signals(),
+        state,
+        consecutive_critical_count=count,
     )
     assert count == 0
 
@@ -279,14 +367,24 @@ def test_low_completion_rate_during_ramp_up_not_critical():
     ramp_up = PrimarySignals(
         state_transitions={"throughput_per_sec": 100, "latency_p95_ms": 50, "latency_p99_ms": 80},
         workflow_completion={"completion_rate": 0.2, "success_per_sec": 2, "failed_per_sec": 0.5},
-        history={"backlog_age_sec": 5, "task_processing_rate_per_sec": 100, "shard_churn_rate_per_sec": 0},
+        history={
+            "backlog_age_sec": 5,
+            "task_processing_rate_per_sec": 100,
+            "shard_churn_rate_per_sec": 0,
+        },
         frontend={"error_rate_per_sec": 0, "latency_p95_ms": 50, "latency_p99_ms": 80},
         matching={"workflow_backlog_age_sec": 0, "activity_backlog_age_sec": 0},
         poller={"poll_success_rate": 0.99, "poll_timeout_rate": 0.01, "long_poll_latency_ms": 10},
-        persistence={"latency_p95_ms": 10, "latency_p99_ms": 20, "error_rate_per_sec": 0, "retry_rate_per_sec": 0},
+        persistence={
+            "latency_p95_ms": 10,
+            "latency_p99_ms": 20,
+            "error_rate_per_sec": 0,
+            "retry_rate_per_sec": 0,
+        },
     )
     result, _ = evaluate_health_state(
-        ramp_up, HealthState.STRESSED,
+        ramp_up,
+        HealthState.STRESSED,
         consecutive_critical_count=CONSECUTIVE_CRITICAL_THRESHOLD,
     )
     assert result != HealthState.CRITICAL
