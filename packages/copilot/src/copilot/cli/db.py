@@ -22,7 +22,13 @@ def get_dsql_token(endpoint: str, region: str) -> str:
 
 
 async def execute_schema(endpoint: str, database: str, region: str, schema_sql: str) -> None:
-    """Execute schema SQL against DSQL."""
+    """Execute schema SQL against DSQL.
+
+    DSQL requires each DDL statement (especially CREATE INDEX ASYNC) to run
+    in its own transaction. We split the SQL file on semicolons and execute
+    each non-empty statement individually, ignoring "already exists" errors
+    so the command is idempotent.
+    """
     token = get_dsql_token(endpoint, region)
 
     conn = await asyncpg.connect(
@@ -35,7 +41,22 @@ async def execute_schema(endpoint: str, database: str, region: str, schema_sql: 
     )
 
     try:
-        await conn.execute(schema_sql)
+        # Split on semicolons, strip leading comments from each chunk
+        statements = []
+        for raw in schema_sql.split(";"):
+            lines = raw.strip().splitlines()
+            while lines and lines[0].strip().startswith("--"):
+                lines.pop(0)
+            cleaned = "\n".join(lines).strip()
+            if cleaned:
+                statements.append(cleaned)
+        for stmt in statements:
+            try:
+                await conn.execute(stmt)
+            except asyncpg.DuplicateTableError:
+                pass  # CREATE TABLE IF NOT EXISTS — already exists
+            except asyncpg.DuplicateObjectError:
+                pass  # CREATE INDEX — already exists
     finally:
         await conn.close()
 

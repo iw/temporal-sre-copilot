@@ -469,6 +469,7 @@ services:
       - ~/.aws:/home/copilot/.aws:ro
     environment:
       - TEMPORAL_ADDRESS=copilot-temporal:7233
+      - MONITORED_TEMPORAL_ADDRESS=temporal-frontend:7233
       - COPILOT_DSQL_ENDPOINT=${COPILOT_DSQL_HOST}
       - DSQL_DATABASE=${COPILOT_DSQL_DATABASE:-postgres}
       - PROMETHEUS_ENDPOINT=http://mimir:9009/prometheus

@@ -15,6 +15,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException
+from temporalio.api.workflowservice.v1 import GetClusterInfoRequest
 from whenever import Instant, TimeDelta
 
 from behaviour_profiles.comparison import compare_profiles
@@ -36,20 +37,23 @@ router = APIRouter(prefix="/profiles", tags=["profiles"])
 # These are set at mount time by the copilot app via `configure_profile_router`
 _storage: ProfileStorage | None = None
 _prometheus_endpoint: str | None = None
+_monitored_temporal_address: str | None = None
 
 
 def configure_profile_router(
     *,
     storage: ProfileStorage,
     prometheus_endpoint: str,
+    monitored_temporal_address: str | None = None,
 ) -> None:
     """Inject dependencies into the profile router.
 
     Called by the copilot app during startup before mounting the router.
     """
-    global _storage, _prometheus_endpoint
+    global _storage, _prometheus_endpoint, _monitored_temporal_address
     _storage = storage
     _prometheus_endpoint = prometheus_endpoint
+    _monitored_temporal_address = monitored_temporal_address
 
 
 def _get_storage() -> ProfileStorage:
@@ -59,6 +63,25 @@ def _get_storage() -> ProfileStorage:
 
 
 _MAX_WINDOW = TimeDelta(hours=24)
+
+
+async def _fetch_cluster_versions() -> tuple[str | None, str | None]:
+    """Query the monitored Temporal cluster for server and plugin version.
+
+    Uses GetClusterInfo gRPC — returns (server_version, dsql_plugin_version).
+    The persistence_store field contains the plugin name (e.g. "dsql").
+    """
+    from temporalio.client import Client
+
+    client = await Client.connect(_monitored_temporal_address)
+    info = await client.workflow_service.get_cluster_info(
+        GetClusterInfoRequest()
+    )
+    server_version = info.server_version or None
+    # persistence_store reports the plugin name; the DSQL plugin version
+    # is the same as the server version in the temporal-dsql fork
+    dsql_version = server_version if info.persistence_store == "dsql" else None
+    return server_version, dsql_version
 
 
 @router.post("/", status_code=201)
@@ -91,6 +114,15 @@ async def create_profile(request: CreateProfileRequest) -> ProfileMetadata:
         end=request.time_window_end,
     )
 
+    # Collect version metadata from the monitored cluster via gRPC
+    server_version: str | None = None
+    dsql_plugin_version: str | None = None
+    if _monitored_temporal_address:
+        try:
+            server_version, dsql_plugin_version = await _fetch_cluster_versions()
+        except Exception:
+            logger.warning("Failed to fetch cluster version info", exc_info=True)
+
     # Config snapshot is not auto-collected — marked None to distinguish
     # "not collected" from "collected but empty". Config collection requires
     # querying the monitored cluster's dynamic config and env vars, which
@@ -104,6 +136,8 @@ async def create_profile(request: CreateProfileRequest) -> ProfileMetadata:
         task_queue=request.task_queue,
         time_window_start=request.time_window_start,
         time_window_end=request.time_window_end,
+        temporal_server_version=server_version,
+        dsql_plugin_version=dsql_plugin_version,
         config_snapshot=None,
         telemetry=telemetry,
         created_at=Instant.now().format_iso(),
