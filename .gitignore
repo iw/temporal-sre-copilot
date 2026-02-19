@@ -66,5 +66,8 @@ terraform/**/*_override.tf.json
 # Compiled config artifacts
 .temporal-dsql/
 
+# Ephemeral scripts
+scripts/
+
 # macOS
 .DS_Store
