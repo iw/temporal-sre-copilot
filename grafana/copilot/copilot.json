@@ -22,13 +22,15 @@
     {
       "id": 1,
       "title": "",
-      "type": "text",
+      "type": "marcusolsson-dynamictext-panel",
       "gridPos": { "h": 7, "w": 16, "x": 0, "y": 0 },
       "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
       "options": {
-        "mode": "html",
-        "content": "",
-        "code": { "language": "html", "showLineNumbers": false }
+        "content": "## {{health_state}}\n\n{{summary}}\n\n<small style=\"color: #888\">{{timestamp}}</small>",
+        "defaultContent": "Waiting for Copilot assessment data…",
+        "editor": { "format": "auto", "language": "markdown" },
+        "everyRow": true,
+        "wrap": true
       },
       "targets": [
         {
@@ -321,10 +323,10 @@
       "title": "Log Pattern Alerts",
       "type": "table",
       "gridPos": { "h": 6, "w": 24, "x": 0, "y": 28 },
-      "datasource": { "type": "prometheus", "uid": "amp" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "amp" },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "topk(10, sum by (pattern, service) (copilot_log_pattern_count))",
           "legendFormat": "{{pattern}} ({{service}})",
           "refId": "A"
@@ -383,43 +385,63 @@
     },
     {
       "id": 12,
-      "title": "Create Behaviour Profile",
-      "type": "marcusolsson-dynamictext-panel",
-      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 41 },
-      "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
-      "targets": [
-        {
-          "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
-          "urlPath": "/profiles/",
-          "method": "POST",
-          "cacheDurationSeconds": 0,
-          "body": "{\"name\": \"profile-${__from:date:iso}-${__to:date:iso}\", \"cluster_id\": \"${cluster_id}\", \"time_window_start\": \"${__from:date:iso}\", \"time_window_end\": \"${__to:date:iso}\", \"namespace\": \"${namespace}\", \"task_queue\": \"${task_queue}\", \"label\": \"${profile_label}\"}",
-          "fields": [
-            { "jsonPath": "$.id", "name": "id" },
-            { "jsonPath": "$.name", "name": "name" },
-            { "jsonPath": "$.label", "name": "label" },
-            { "jsonPath": "$.cluster_id", "name": "cluster_id" },
-            { "jsonPath": "$.time_window_start", "name": "time_window_start" },
-            { "jsonPath": "$.time_window_end", "name": "time_window_end" },
-            { "jsonPath": "$.is_baseline", "name": "is_baseline" },
-            { "jsonPath": "$.created_at", "name": "created_at" }
-          ]
-        }
-      ],
+      "title": "Behaviour Profiles",
+      "type": "canvas",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 41 },
       "options": {
-        "content": "### ✅ Profile Created\n\n| Field | Value |\n|-------|-------|\n| **ID** | `{{{id}}}` |\n| **Name** | {{{name}}} |\n| **Label** | {{{label}}} |\n| **Cluster** | {{{cluster_id}}} |\n| **Time Window** | {{{time_window_start}}} → {{{time_window_end}}} |\n| **Created** | {{{created_at}}} |\n\nProfile snapshot captured successfully. Use the profile ID to compare against other profiles or set as baseline.",
-        "defaultContent": "### 📸 Create Behaviour Profile\n\nClick the **refresh icon** on this panel to snapshot the current dashboard time range as a behaviour profile.\n\n**Configuration** (set via dashboard variables above):\n- **Cluster ID**: `${cluster_id}`\n- **Namespace**: `${namespace}`\n- **Task Queue**: `${task_queue}` (optional)\n- **Label**: `${profile_label}` (optional)\n- **Time Range**: `${__from:date:iso}` → `${__to:date:iso}`\n\n> The profile will capture configuration and telemetry aggregates for the selected time window (max 24 hours).",
-        "editor": { "format": "auto", "language": "markdown" },
-        "everyRow": false,
-        "wrap": true
+        "inlineEditing": false,
+        "panZoom": false,
+        "root": {
+          "background": { "color": { "fixed": "transparent" } },
+          "border": { "width": 0 },
+          "constraint": { "horizontal": "left", "vertical": "top" },
+          "elements": [
+            {
+              "background": { "color": { "fixed": "transparent" } },
+              "border": { "width": 0 },
+              "config": {
+                "text": { "fixed": "📸 Create Profile", "mode": "fixed" },
+                "style": { "variant": "primary" },
+                "api": {
+                  "endpoint": "${copilot_api}/profiles/",
+                  "method": "POST",
+                  "contentType": "application/json",
+                  "data": "{\"name\": \"profile-${__from:date:iso}\", \"cluster_id\": \"${cluster_id}\", \"time_window_start\": \"${__from:date:iso}\", \"time_window_end\": \"${__to:date:iso}\", \"namespace\": \"${namespace}\", \"task_queue\": \"${task_queue}\", \"label\": \"${profile_label}\"}"
+                }
+              },
+              "constraint": { "horizontal": "left", "vertical": "top" },
+              "name": "Create Profile Button",
+              "placement": { "height": 36, "left": 0, "top": 8, "width": 180 },
+              "type": "button"
+            },
+            {
+              "background": { "color": { "fixed": "transparent" } },
+              "border": { "width": 0 },
+              "config": {
+                "align": "left",
+                "color": { "fixed": "#cccccc" },
+                "size": 14,
+                "text": { "fixed": "Snapshots the current time range. Set Cluster ID, Namespace, Task Queue, and Profile Label using the dashboard variables above.", "mode": "fixed" },
+                "valign": "middle"
+              },
+              "constraint": { "horizontal": "left", "vertical": "top" },
+              "name": "Instructions",
+              "placement": { "height": 36, "left": 200, "top": 8, "width": 800 },
+              "type": "text"
+            }
+          ],
+          "name": "Element 0",
+          "placement": { "height": 100, "left": 0, "top": 0, "width": 100 },
+          "type": "frame"
+        }
       },
       "fieldConfig": { "defaults": {}, "overrides": [] },
-      "description": "Create a Behaviour Profile by snapshotting the current time range. Set cluster_id, namespace, task_queue, and profile_label using the dashboard variables, then refresh this panel to create the profile."
+      "description": "Click the button to create a Behaviour Profile from the current dashboard time range. Configure cluster_id, namespace, task_queue, and profile_label using the dashboard variables."
     },
     {
       "id": 13,
       "title": "📋 Recent Profiles",
-      "type": "table",
+      "type": "marcusolsson-dynamictext-panel",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 47 },
       "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
       "targets": [
@@ -442,47 +464,13 @@
         }
       ],
       "options": {
-        "showHeader": true,
-        "sortBy": [{ "displayName": "Created", "desc": true }],
-        "cellHeight": "sm",
-        "footer": { "show": true, "countRows": true, "reducer": ["count"] }
+        "content": "| ID | Name | Label | Cluster | Baseline | Created |\n|---|---|---|---|---|---|\n{{#each data}}\n| `{{ID}}` | {{Name}} | {{Label}} | {{Cluster}} | {{#if Baseline}}⭐{{/if}} | {{Created}} |\n{{/each}}",
+        "defaultContent": "No profiles found. Create one using the curl command above, then refresh this panel.",
+        "editor": { "format": "auto", "language": "markdown" },
+        "everyRow": false,
+        "wrap": true
       },
-      "fieldConfig": {
-        "defaults": { "custom": { "align": "auto" } },
-        "overrides": [
-          {
-            "matcher": { "id": "byName", "options": "ID" },
-            "properties": [
-              { "id": "custom.width", "value": 280 }
-            ]
-          },
-          {
-            "matcher": { "id": "byName", "options": "Baseline" },
-            "properties": [
-              { "id": "custom.width", "value": 80 },
-              {
-                "id": "mappings",
-                "value": [
-                  { "type": "value", "options": { "true": { "text": "⭐", "color": "green" } } },
-                  { "type": "value", "options": { "false": { "text": "", "color": "transparent" } } }
-                ]
-              }
-            ]
-          },
-          {
-            "matcher": { "id": "byName", "options": "Start" },
-            "properties": [{ "id": "unit", "value": "dateTimeAsIso" }]
-          },
-          {
-            "matcher": { "id": "byName", "options": "End" },
-            "properties": [{ "id": "unit", "value": "dateTimeAsIso" }]
-          },
-          {
-            "matcher": { "id": "byName", "options": "Created" },
-            "properties": [{ "id": "unit", "value": "dateTimeAsIso" }]
-          }
-        ]
-      },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
       "description": "List of behaviour profiles for the selected cluster and namespace"
     }
   ],
@@ -491,6 +479,15 @@
   "tags": ["copilot", "temporal", "sre", "ai"],
   "templating": {
     "list": [
+      {
+        "name": "copilot_api",
+        "label": "Copilot API",
+        "type": "textbox",
+        "current": { "value": "http://localhost:8081" },
+        "options": [],
+        "query": "http://localhost:8081",
+        "description": "Copilot API base URL (browser-reachable)"
+      },
       {
         "name": "cluster_id",
         "label": "Cluster ID",

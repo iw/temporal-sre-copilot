@@ -11,7 +11,7 @@ Quick Start:
     handle = await client.start_workflow(
         ObserveClusterWorkflow.run,
         ObserveClusterInput(
-            amp_endpoint="http://amp:9090",
+            prometheus_endpoint="http://prometheus:9090",
             dsql_endpoint="dsql.example.com",
         ),
         id="observe-cluster",

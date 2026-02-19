@@ -31,7 +31,7 @@ class ObserveClusterInput(BaseModel):
     health state using deterministic rules.
     """
 
-    amp_endpoint: str = Field(description="Amazon Managed Prometheus query endpoint URL")
+    prometheus_endpoint: str = Field(description="Prometheus-compatible query endpoint URL")
     dsql_endpoint: str = Field(description="DSQL cluster endpoint for state storage")
 
 
@@ -74,7 +74,7 @@ class ScheduledAssessmentInput(BaseModel):
     changes, ensuring regular health checks.
     """
 
-    amp_endpoint: str = Field(description="Amazon Managed Prometheus query endpoint URL")
+    prometheus_endpoint: str = Field(description="Prometheus-compatible query endpoint URL")
     dsql_endpoint: str = Field(description="DSQL cluster endpoint for state storage")
     kb_id: str | None = Field(default=None, description="Bedrock Knowledge Base ID for RAG context")
     loki_url: str | None = Field(default=None, description="Loki URL for fetching log patterns")

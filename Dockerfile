@@ -3,7 +3,7 @@
 #
 # Entry points:
 #   Worker: python -m copilot.worker
-#   API:    uvicorn copilot.api:app --host 0.0.0.0 --port 8080
+#   API:    granian --interface asgi copilot.api:app --host 0.0.0.0 --port 8080
 #   Start:  python -m copilot.starter
 
 FROM python:3.14-slim AS builder
@@ -29,11 +29,11 @@ RUN mkdir -p packages/copilot_core/src/copilot_core \
     && touch packages/behaviour_profiles/src/behaviour_profiles/__init__.py \
     && mkdir -p packages/copilot/src/copilot \
     && touch packages/copilot/src/copilot/__init__.py
-RUN uv sync --frozen --no-dev --no-editable --no-install-workspace
+RUN uv sync --frozen --no-dev --no-editable --no-install-workspace --package temporal-sre-copilot
 
 # Copy all package source and install workspace packages
 COPY packages/ packages/
-RUN uv sync --frozen --no-dev --no-editable
+RUN uv sync --frozen --no-dev --no-editable --package temporal-sre-copilot
 
 FROM python:3.14-slim AS runtime
 

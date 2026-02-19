@@ -10,7 +10,7 @@ The result: operators see a single Happy / Stressed / Critical status with a nat
 
 Two supporting capabilities form a feedback loop with the Copilot:
 
-**[Config Compiler](docs/config-compiler.md)** — Collapses hundreds of Temporal + DSQL configuration parameters into ~15 surfaced inputs. Pick a scale preset, optionally a workload modifier, and the compiler derives all safety and tuning parameters, applies guard rails, and emits validated artifacts through pluggable adapters. `uv run temporal-dsql-config compile mid-scale --name prod-v2`
+**[Config Compiler](docs/config-compiler.md)** — Collapses hundreds of Temporal + DSQL configuration parameters into ~15 surfaced inputs. Pick a scale preset, optionally a workload modifier, and the compiler derives all safety and tuning parameters, applies guard rails, and emits validated artifacts through pluggable adapters. `just config compile mid-scale --name prod-v2`
 
 **[Behaviour Profiles](docs/behaviour-profiles.md)** — Snapshot a time window of a running cluster (config + curated telemetry + version metadata) into a labelled profile. Compare profiles, detect drift against a baseline, and validate that a preset produces the expected telemetry bounds.
 
@@ -20,6 +20,86 @@ Config Compiler ──► Presets define expected telemetry bounds
         │                                          ▼
 Copilot recommends          Behaviour Profiles validate
 preset changes ◄──────────── that bounds are met
+```
+
+---
+
+## Quick start
+
+Get the full Copilot running locally — a monitored Temporal cluster, observability stack, and the Copilot itself — all in Docker Compose. The only external dependency is the [`temporal-dsql`](https://github.com/iw/temporal) repo for building the Temporal server image.
+
+### Prerequisites
+
+- Docker Desktop (6 GB+ memory)
+- AWS CLI configured with DSQL and Bedrock permissions
+- Python 3.14+ and [uv](https://docs.astral.sh/uv/getting-started/installation/)
+- [just](https://just.systems/) task runner
+- Terraform 1.0+
+- [`temporal-dsql`](https://github.com/iw/temporal) repo cloned at `../temporal-dsql`
+
+### Install
+
+```bash
+uv sync
+```
+
+The repo uses [just](https://just.systems/) as a task runner. The `just copilot` recipe invokes the Copilot CLI via `uv run --package temporal-sre-copilot copilot` — the `--package` flag is required in a uv workspace monorepo where the root `pyproject.toml` is not itself a package.
+
+### Provision infrastructure
+
+Two ephemeral DSQL clusters (monitored + copilot) and a Bedrock Knowledge Base:
+
+```bash
+just copilot dev infra apply
+```
+
+### Configure
+
+```bash
+cp dev/.env.example dev/.env
+# Set values from `copilot dev infra apply` terraform output:
+#   TEMPORAL_SQL_HOST          — monitored cluster DSQL endpoint
+#   COPILOT_DSQL_HOST          — copilot cluster DSQL endpoint
+#   COPILOT_PROFILE_S3_BUCKET  — S3 bucket for behaviour profiles (optional)
+#   COPILOT_KNOWLEDGE_BASE_ID  — Bedrock KB ID (optional)
+```
+
+### Build and start
+
+```bash
+just copilot dev build           # Build runtime + copilot images
+just copilot dev up              # Start all 15 services
+just copilot dev schema setup    # Apply schemas to both clusters + ES
+```
+
+### Verify
+
+- Temporal UI (monitored): http://localhost:8080
+- Grafana (admin/admin): http://localhost:3000
+- Copilot API: http://localhost:8081
+- Copilot Temporal UI: http://localhost:8082
+
+### Manage
+
+```bash
+just copilot dev ps              # Service status
+just copilot dev logs            # Tail all logs
+just copilot dev logs <service>  # Tail specific service
+just copilot dev down            # Stop services
+just copilot dev down -v         # Stop + remove volumes
+just copilot dev infra destroy   # Tear down AWS resources
+```
+
+See [dev/README.md](dev/README.md) for the full setup guide, port mapping, environment variable reference, and troubleshooting.
+
+### Set up the knowledge base
+
+Optionally populate the RAG knowledge base for richer health explanations:
+
+```bash
+just copilot kb sync --bucket <s3-bucket> --source docs/rag
+just copilot kb start-ingestion --kb-id <kb-id> --ds-id <data-source-id>
+just copilot kb status --kb-id <kb-id>
 ```
 
 ---
@@ -138,11 +218,51 @@ The Copilot uses a Bedrock Knowledge Base (Titan Embeddings V2, S3 Vectors) to g
 - Failure mode heuristics and remediation patterns
 - Grafana dashboard interpretation guides
 
-The corpus excludes raw metrics/PromQL (those belong in code) and dated benchmark results. Refreshable without restarting the Copilot via `copilot kb sync` + `copilot kb start-ingestion`.
+The corpus excludes raw metrics/PromQL (those belong in code) and dated benchmark results. Refreshable without restarting the Copilot via `just copilot kb sync` + `just copilot kb start-ingestion`.
 
 ---
 
 ## Architecture
+
+### Local development
+
+The `dev/` directory runs 15 services on a single Docker network — three groups connected to ephemeral AWS resources:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     DOCKER COMPOSE NETWORK                          │
+│                                                                     │
+│  MONITORED CLUSTER              OBSERVABILITY        COPILOT        │
+│  ┌──────────────────┐          ┌────────────┐       ┌────────────┐ │
+│  │ temporal-frontend │──┐      │ mimir      │       │ copilot-   │ │
+│  │ temporal-history  │  │      │ (metrics)  │◄──────│ temporal   │ │
+│  │ temporal-matching │  ├─────▶│            │       │            │ │
+│  │ temporal-worker   │  │      ├────────────┤       ├────────────┤ │
+│  └──────────────────┘  │      │ loki       │       │ copilot-   │ │
+│  ┌──────────────────┐  │      │ (logs)     │◄──────│ worker     │ │
+│  │ elasticsearch    │  │      ├────────────┤       │ (Pydantic  │ │
+│  │ temporal-ui      │  │      │ alloy      │       │  AI)       │ │
+│  └──────────────────┘  │      │ (collector)│       ├────────────┤ │
+│                        │      ├────────────┤       │ copilot-   │ │
+│                        └─────▶│ grafana    │◄──────│ api        │ │
+│                               │ :3000      │       │ :8081      │ │
+│                               └────────────┘       └────────────┘ │
+│                                                                     │
+│  ┌──────────────────┐                          ┌────────────────┐  │
+│  │ Aurora DSQL      │                          │ Aurora DSQL    │  │
+│  │ (monitored)      │                          │ (copilot)      │  │
+│  └──────────────────┘                          └────────────────┘  │
+│                                                          │         │
+│                                                ┌─────────▼──────┐  │
+│                                                │ Amazon Bedrock │  │
+│                                                │ (Claude, KB)   │  │
+│                                                └────────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Production (ECS)
+
+In production, the Copilot runs on its own ECS cluster in the same VPC as the monitored deployment. A failure in the Copilot cannot impact production.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -174,52 +294,18 @@ The corpus excludes raw metrics/PromQL (those belong in code) and dated benchmar
       Grafana
 ```
 
-The Copilot cluster runs in the same VPC as the monitored Temporal deployment but on separate ECS infrastructure. A failure in the Copilot cannot impact production.
-
 ---
 
-## Quick start
+## Production deployment
 
-### Prerequisites
-
-- Python 3.14+ and [uv](https://docs.astral.sh/uv/getting-started/installation/)
-- AWS CLI configured with appropriate permissions
-- Terraform 1.0+
-- A running [`temporal-dsql-deploy-ecs`](../temporal-dsql-deploy-ecs/) deployment (provides AMP, Loki, DSQL, VPC)
-
-### Install
-
-```bash
-uv sync
-```
+To run the Copilot against a real production cluster, you need a [`temporal-dsql-deploy-ecs`](../temporal-dsql-deploy-ecs/) deployment. This provides the monitored Temporal cluster, AMP, Loki, DSQL, and VPC that the Copilot observes.
 
 ### Set up the database
 
 ```bash
-uv run copilot db check-connection    # verify DSQL connectivity
-uv run copilot db setup-schema        # apply schema
-uv run copilot db list-tables         # confirm tables exist
-```
-
-### Set up the knowledge base
-
-```bash
-uv run copilot kb sync --bucket <s3-bucket> --source docs/rag
-uv run copilot kb start-ingestion --kb-id <kb-id> --ds-id <data-source-id>
-uv run copilot kb status --kb-id <kb-id>
-```
-
-### Run locally
-
-```bash
-# Start the worker (processes all four workflows)
-python -m copilot.worker
-
-# Start the API (Copilot status + Profile endpoints)
-uvicorn copilot.api:app --host 0.0.0.0 --port 8080
-
-# Start workflows (ObserveCluster, LogWatcher, ScheduledAssessment)
-python -m copilot.starter
+just copilot db check-connection -e <dsql-endpoint>
+just copilot db setup-schema -e <dsql-endpoint>
+just copilot db list-tables -e <dsql-endpoint>
 ```
 
 ### Deploy to ECS
@@ -233,8 +319,6 @@ terraform init
 terraform plan
 terraform apply
 ```
-
-For local development with Docker Compose, the Copilot's DSQL cluster and Bedrock KB are provisioned from `temporal-dsql-deploy/terraform/copilot/`. See the [copilot profile README](../temporal-dsql-deploy/profiles/copilot/README.md).
 
 ---
 
@@ -251,6 +335,7 @@ temporal-sre-copilot/
 │   ├── dsql_config/                # config compiler + CLI
 │   ├── behaviour_profiles/         # profile store + API
 │   └── copilot/                    # orchestrator (depends on all three)
+├── dev/                            # standalone dev environment (Docker Compose)
 ├── tests/                          # shared test directory (156 tests, ~10s)
 │   └── properties/                 # Hypothesis property-based tests
 ├── terraform/                      # modular infrastructure

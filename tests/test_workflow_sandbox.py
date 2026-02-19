@@ -148,7 +148,7 @@ class SignalsRoundTripWorkflow:
         # Step 1: Activity returns Signals
         signals = await workflow.execute_activity(
             fake_fetch_signals,
-            FetchSignalsInput(amp_endpoint="http://fake-amp"),
+            FetchSignalsInput(prometheus_endpoint="http://fake-amp"),
             start_to_close_timeout=timedelta(seconds=10),
         )
 

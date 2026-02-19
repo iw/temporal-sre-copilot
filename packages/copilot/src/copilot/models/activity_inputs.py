@@ -32,13 +32,13 @@ from .signals import Signals  # noqa: TC001
 class FetchSignalsInput(BaseModel):
     """Input for fetch_signals_from_amp activity."""
 
-    amp_endpoint: str = Field(description="AMP workspace query endpoint URL")
+    prometheus_endpoint: str = Field(description="Prometheus-compatible query endpoint URL")
 
 
 class FetchWorkerSignalsInput(BaseModel):
     """Input for fetch_worker_signals_from_amp activity."""
 
-    amp_endpoint: str = Field(description="AMP workspace query endpoint URL")
+    prometheus_endpoint: str = Field(description="Prometheus-compatible query endpoint URL")
 
 
 # =============================================================================

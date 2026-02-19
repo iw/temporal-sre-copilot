@@ -376,20 +376,21 @@ async def fetch_signals_from_amp(input: FetchSignalsInput) -> Signals:
     that drive the Health State Machine.
 
     Args:
-        input: FetchSignalsInput with AMP endpoint
+        input: FetchSignalsInput with Prometheus endpoint
 
     Returns:
         Signals object containing primary and amplifier signals
     """
-    activity.logger.info(f"Fetching signals from AMP: {input.amp_endpoint}")
+    activity.logger.info(f"Fetching signals from {input.prometheus_endpoint}")
 
     async with httpx.AsyncClient() as client:
         # Fetch primary signals
-        primary_results = await _fetch_all_queries(client, input.amp_endpoint, PRIMARY_QUERIES)
+        endpoint = input.prometheus_endpoint
+        primary_results = await _fetch_all_queries(client, endpoint, PRIMARY_QUERIES)
         primary = _build_primary_signals(primary_results)
 
         # Fetch amplifier signals
-        amplifier_results = await _fetch_all_queries(client, input.amp_endpoint, AMPLIFIER_QUERIES)
+        amplifier_results = await _fetch_all_queries(client, endpoint, AMPLIFIER_QUERIES)
         amplifiers = _build_amplifier_signals(amplifier_results)
 
     activity.logger.info(
@@ -479,21 +480,22 @@ async def fetch_worker_signals_from_amp(input: FetchWorkerSignalsInput) -> Worke
     Worker signals answer: "Can workers make forward progress?"
 
     Args:
-        input: FetchWorkerSignalsInput with AMP endpoint
+        input: FetchWorkerSignalsInput with Prometheus endpoint
 
     Returns:
         WorkerHealthSignals object containing worker signals and amplifiers
     """
-    activity.logger.info(f"Fetching worker signals from AMP: {input.amp_endpoint}")
+    activity.logger.info(f"Fetching worker signals from {input.prometheus_endpoint}")
 
     async with httpx.AsyncClient() as client:
         # Fetch worker signals
-        signal_results = await _fetch_all_queries(client, input.amp_endpoint, WORKER_SIGNAL_QUERIES)
+        endpoint = input.prometheus_endpoint
+        signal_results = await _fetch_all_queries(client, endpoint, WORKER_SIGNAL_QUERIES)
         worker_signals = _build_worker_signals(signal_results)
 
         # Fetch worker amplifiers
         amplifier_results = await _fetch_all_queries(
-            client, input.amp_endpoint, WORKER_AMPLIFIER_QUERIES
+            client, endpoint, WORKER_AMPLIFIER_QUERIES
         )
         cache_amplifiers = _build_worker_cache_amplifiers(amplifier_results)
         poll_amplifiers = _build_worker_poll_amplifiers(amplifier_results, worker_signals)

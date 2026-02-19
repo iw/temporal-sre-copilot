@@ -1,6 +1,12 @@
 set dotenv-load
 
+export COPILOT_REPO_ROOT := justfile_directory()
+
 ARGS_TEST := env("_UV_RUN_ARGS_TEST", "")
+
+# Shorthand for running a workspace package's CLI entry point
+@_pkg pkg *args:
+    uv run --package {{ pkg }} {{ args }}
 
 @_default:
     just --list
@@ -10,7 +16,7 @@ ARGS_TEST := env("_UV_RUN_ARGS_TEST", "")
 test *args:
     uv run {{ ARGS_TEST }} -m pytest {{ args }}
 
-_cov *args:
+@_cov *args:
     uv run -m coverage {{ args }}
 
 # Run tests and measure coverage
@@ -45,8 +51,13 @@ check-all: lint test typing
 
 # Run the config compiler CLI
 [group('tools')]
-config *args:
-    uv run temporal-dsql-config {{ args }}
+@config *args:
+    just _pkg dsql-config temporal-dsql-config {{ args }}
+
+# Run the copilot CLI
+[group('tools')]
+@copilot *args:
+    just _pkg temporal-sre-copilot copilot {{ args }}
 
 # Update dependencies
 [group('lifecycle')]
@@ -67,3 +78,28 @@ clean:
 # Recreate project virtualenv from nothing
 [group('lifecycle')]
 fresh: clean install
+
+# Start dev environment
+[group('dev')]
+@dev-up:
+    just copilot dev up
+
+# Stop dev environment
+[group('dev')]
+@dev-down:
+    just copilot dev down
+
+# Build dev images
+[group('dev')]
+@dev-build:
+    just copilot dev build
+
+# Show dev service status
+[group('dev')]
+@dev-ps:
+    just copilot dev ps
+
+# Tail dev logs
+[group('dev')]
+@dev-logs *args:
+    just copilot dev logs {{ args }}

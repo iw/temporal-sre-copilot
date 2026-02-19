@@ -71,7 +71,7 @@ class ObserveClusterWorkflow:
                 # Fetch current signals from AMP
                 signals = await workflow.execute_activity(
                     fetch_signals_from_amp,
-                    FetchSignalsInput(amp_endpoint=input.amp_endpoint),
+                    FetchSignalsInput(prometheus_endpoint=input.prometheus_endpoint),
                     start_to_close_timeout=TimeDelta(seconds=30).py_timedelta(),
                 )
 

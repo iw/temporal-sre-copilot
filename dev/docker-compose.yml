@@ -1,0 +1,499 @@
+# Standalone Dev Environment — Monitored Temporal cluster + SRE Copilot
+services:
+
+  # MONITORED TEMPORAL CLUSTER
+  elasticsearch:
+    container_name: temporal-elasticsearch
+    platform: linux/arm64
+    image: elasticsearch:8.11.0
+    environment:
+      - cluster.routing.allocation.disk.threshold_enabled=true
+      - cluster.routing.allocation.disk.watermark.low=512mb
+      - cluster.routing.allocation.disk.watermark.high=256mb
+      - cluster.routing.allocation.disk.watermark.flood_stage=128mb
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms256m -Xmx256m
+      - xpack.security.enabled=false
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    networks:
+      - temporal-network
+    cap_add:
+      - IPC_LOCK
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    restart: unless-stopped
+
+  elasticsearch-setup:
+    container_name: temporal-elasticsearch-setup
+    platform: linux/arm64
+    image: temporalio/auto-setup:latest
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      - ES_SERVER=http://elasticsearch:9200
+      - TEMPORAL_HOME=/etc/temporal
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -euo pipefail
+        SCHEMA_DIR=$$TEMPORAL_HOME/schema/elasticsearch/visibility
+
+        echo "Applying cluster settings..."
+        curl --fail -X PUT "$$ES_SERVER/_cluster/settings" \
+          -H "Content-Type: application/json" \
+          --data-binary "@$$SCHEMA_DIR/cluster_settings_v7.json" --write-out "\n"
+
+        echo "Applying index template..."
+        curl --fail -X PUT "$$ES_SERVER/_template/temporal_visibility_v1_template" \
+          -H "Content-Type: application/json" \
+          --data-binary "@$$SCHEMA_DIR/index_template_v7.json" --write-out "\n"
+
+        echo "Creating monitored cluster visibility index..."
+        curl -X PUT "$$ES_SERVER/temporal_visibility_v1_dev" --write-out "\n"
+
+        echo "Creating copilot cluster visibility index..."
+        curl -X PUT "$$ES_SERVER/temporal_visibility_copilot_dev" --write-out "\n"
+
+        echo "Elasticsearch setup complete."
+    networks:
+      - temporal-network
+
+  temporal-history:
+    container_name: temporal-dsql-history
+    hostname: temporal-history
+    platform: linux/arm64
+    image: temporal-dsql-runtime:test
+    pull_policy: never
+    depends_on:
+      elasticsearch-setup:
+        condition: service_completed_successfully
+    command:
+      ["--config-file", "/etc/temporal/config/persistence-dsql.yaml", "--allow-no-auth", "start", "--service", "history"]
+    env_file:
+      - .env
+    volumes:
+      - ~/.aws:/home/temporal/.aws:ro
+      - ./dynamicconfig:/etc/temporal/config/dynamicconfig:ro
+      - ./docker/persistence-dsql-elasticsearch.template.yaml:/etc/temporal/config/persistence-dsql-elasticsearch.template.yaml:ro
+    environment:
+      - AWS_EC2_METADATA_DISABLED=true
+      - TEMPORAL_PERSISTENCE_TEMPLATE=/etc/temporal/config/persistence-dsql-elasticsearch.template.yaml
+      - DSQL_TOKEN_DURATION=2m
+      - DSQL_STAGGERED_STARTUP=false
+      - DSQL_RESERVOIR_ENABLED=true
+      - DSQL_RESERVOIR_TARGET_READY=50
+      - DSQL_RESERVOIR_BASE_LIFETIME=11m
+      - DSQL_RESERVOIR_LIFETIME_JITTER=2m
+      - DSQL_RESERVOIR_GUARD_WINDOW=45s
+    ports:
+      - "7234:7234"
+      - "6934:6934"
+    expose:
+      - "9090"
+    networks:
+      - temporal-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z temporal-dsql-history 7234 || nc -z $$(hostname -i) 7234"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  temporal-matching:
+    container_name: temporal-dsql-matching
+    hostname: temporal-matching
+    platform: linux/arm64
+    image: temporal-dsql-runtime:test
+    pull_policy: never
+    depends_on:
+      elasticsearch-setup:
+        condition: service_completed_successfully
+      temporal-history:
+        condition: service_healthy
+    command:
+      ["--config-file", "/etc/temporal/config/persistence-dsql.yaml", "--allow-no-auth", "start", "--service", "matching"]
+    env_file:
+      - .env
+    volumes:
+      - ~/.aws:/home/temporal/.aws:ro
+      - ./dynamicconfig:/etc/temporal/config/dynamicconfig:ro
+      - ./docker/persistence-dsql-elasticsearch.template.yaml:/etc/temporal/config/persistence-dsql-elasticsearch.template.yaml:ro
+    environment:
+      - AWS_EC2_METADATA_DISABLED=true
+      - TEMPORAL_PERSISTENCE_TEMPLATE=/etc/temporal/config/persistence-dsql-elasticsearch.template.yaml
+      - DSQL_TOKEN_DURATION=2m
+      - DSQL_STAGGERED_STARTUP=false
+      - DSQL_RESERVOIR_ENABLED=true
+      - DSQL_RESERVOIR_TARGET_READY=50
+      - DSQL_RESERVOIR_BASE_LIFETIME=11m
+      - DSQL_RESERVOIR_LIFETIME_JITTER=2m
+      - DSQL_RESERVOIR_GUARD_WINDOW=45s
+    ports:
+      - "7235:7235"
+      - "6935:6935"
+    expose:
+      - "9090"
+    networks:
+      - temporal-network
+    restart: unless-stopped
+
+  temporal-frontend:
+    container_name: temporal-dsql-frontend
+    hostname: temporal-frontend
+    platform: linux/arm64
+    image: temporal-dsql-runtime:test
+    pull_policy: never
+    depends_on:
+      elasticsearch-setup:
+        condition: service_completed_successfully
+      temporal-history:
+        condition: service_healthy
+      temporal-matching:
+        condition: service_started
+    command:
+      ["--config-file", "/etc/temporal/config/persistence-dsql.yaml", "--allow-no-auth", "start", "--service", "frontend"]
+    env_file:
+      - .env
+    volumes:
+      - ~/.aws:/home/temporal/.aws:ro
+      - ./dynamicconfig:/etc/temporal/config/dynamicconfig:ro
+      - ./docker/persistence-dsql-elasticsearch.template.yaml:/etc/temporal/config/persistence-dsql-elasticsearch.template.yaml:ro
+    environment:
+      - AWS_EC2_METADATA_DISABLED=true
+      - TEMPORAL_PERSISTENCE_TEMPLATE=/etc/temporal/config/persistence-dsql-elasticsearch.template.yaml
+      - DSQL_TOKEN_DURATION=2m
+      - DSQL_STAGGERED_STARTUP=false
+      - DSQL_RESERVOIR_ENABLED=true
+      - DSQL_RESERVOIR_TARGET_READY=50
+      - DSQL_RESERVOIR_BASE_LIFETIME=11m
+      - DSQL_RESERVOIR_LIFETIME_JITTER=2m
+      - DSQL_RESERVOIR_GUARD_WINDOW=45s
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+      - "6933:6933"
+    expose:
+      - "9090"
+    networks:
+      - temporal-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z temporal-dsql-frontend 7233 || nc -z $$(hostname -i) 7233"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  temporal-worker:
+    container_name: temporal-dsql-worker
+    hostname: temporal-worker
+    platform: linux/arm64
+    image: temporal-dsql-runtime:test
+    pull_policy: never
+    depends_on:
+      elasticsearch-setup:
+        condition: service_completed_successfully
+      temporal-history:
+        condition: service_healthy
+      temporal-frontend:
+        condition: service_healthy
+    command:
+      ["--config-file", "/etc/temporal/config/persistence-dsql.yaml", "--allow-no-auth", "start", "--service", "worker"]
+    env_file:
+      - .env
+    volumes:
+      - ~/.aws:/home/temporal/.aws:ro
+      - ./dynamicconfig:/etc/temporal/config/dynamicconfig:ro
+      - ./docker/persistence-dsql-elasticsearch.template.yaml:/etc/temporal/config/persistence-dsql-elasticsearch.template.yaml:ro
+    environment:
+      - AWS_EC2_METADATA_DISABLED=true
+      - TEMPORAL_PERSISTENCE_TEMPLATE=/etc/temporal/config/persistence-dsql-elasticsearch.template.yaml
+      - DSQL_TOKEN_DURATION=2m
+      - DSQL_STAGGERED_STARTUP=false
+      - DSQL_RESERVOIR_ENABLED=true
+      - DSQL_RESERVOIR_TARGET_READY=50
+      - DSQL_RESERVOIR_BASE_LIFETIME=11m
+      - DSQL_RESERVOIR_LIFETIME_JITTER=2m
+      - DSQL_RESERVOIR_GUARD_WINDOW=45s
+    ports:
+      - "7239:7239"
+      - "6939:6939"
+    expose:
+      - "9090"
+    networks:
+      - temporal-network
+    restart: unless-stopped
+
+  temporal-ui:
+    container_name: temporal-dsql-ui
+    platform: linux/arm64
+    image: temporalio/ui:latest
+    depends_on:
+      temporal-frontend:
+        condition: service_healthy
+    environment:
+      - TEMPORAL_ADDRESS=temporal-frontend:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:8080
+    ports:
+      - "8080:8080"
+    networks:
+      - temporal-network
+    restart: unless-stopped
+
+  # OBSERVABILITY STACK
+  mimir:
+    container_name: temporal-mimir
+    platform: linux/arm64
+    image: grafana/mimir:latest
+    command:
+      - --config.file=/etc/mimir/mimir.yaml
+    volumes:
+      - ./config/mimir.yaml:/etc/mimir/mimir.yaml:ro
+      - mimir-data:/data
+    ports:
+      - "9009:9009"
+    networks:
+      - temporal-network
+    restart: unless-stopped
+
+  loki:
+    container_name: temporal-loki
+    platform: linux/arm64
+    image: grafana/loki:latest
+    command:
+      - -config.file=/etc/loki/loki.yaml
+    volumes:
+      - ./config/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+    networks:
+      - temporal-network
+    restart: unless-stopped
+
+  alloy:
+    container_name: temporal-alloy
+    platform: linux/arm64
+    image: grafana/alloy:latest
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --server.http.listen-addr=0.0.0.0:12345
+    volumes:
+      - ./config/alloy.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "12345:12345"
+    networks:
+      - temporal-network
+    depends_on:
+      mimir:
+        condition: service_started
+      loki:
+        condition: service_started
+      temporal-history:
+        condition: service_healthy
+      temporal-matching:
+        condition: service_started
+      temporal-frontend:
+        condition: service_healthy
+      temporal-worker:
+        condition: service_started
+    restart: unless-stopped
+
+  grafana:
+    container_name: temporal-grafana
+    platform: linux/arm64
+    image: grafana/grafana:latest
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_INSTALL_PLUGINS=marcusolsson-json-datasource,marcusolsson-dynamictext-panel
+      - AWS_REGION=${AWS_REGION:-eu-west-1}
+      - AWS_SHARED_CREDENTIALS_FILE=/usr/share/grafana/.aws/credentials
+      - AWS_CONFIG_FILE=/usr/share/grafana/.aws/config
+    volumes:
+      - ./config/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+      - ./config/grafana-dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml:ro
+      - ../grafana:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+      - ~/.aws:/usr/share/grafana/.aws:ro
+    ports:
+      - "3000:3000"
+    networks:
+      - temporal-network
+    depends_on:
+      mimir:
+        condition: service_started
+      loki:
+        condition: service_started
+    restart: unless-stopped
+
+  # COPILOT CLUSTER
+  copilot-temporal:
+    container_name: copilot-temporal
+    hostname: copilot-temporal
+    platform: linux/arm64
+    image: temporal-dsql-runtime:test
+    pull_policy: never
+    depends_on:
+      elasticsearch-setup:
+        condition: service_completed_successfully
+    command:
+      ["--config-file", "/etc/temporal/config/persistence-dsql.yaml", "--allow-no-auth", "start"]
+    volumes:
+      - ~/.aws:/home/temporal/.aws:ro
+      - ./dynamicconfig:/etc/temporal/config/dynamicconfig:ro
+      - ./docker/persistence-dsql-elasticsearch.template.yaml:/etc/temporal/config/persistence-dsql-elasticsearch.template.yaml:ro
+    environment:
+      - AWS_EC2_METADATA_DISABLED=true
+      - TEMPORAL_PERSISTENCE_TEMPLATE=/etc/temporal/config/persistence-dsql-elasticsearch.template.yaml
+      - TEMPORAL_SQL_PLUGIN=dsql
+      - TEMPORAL_SQL_PLUGIN_NAME=dsql
+      - TEMPORAL_SQL_HOST=${COPILOT_DSQL_HOST}
+      - TEMPORAL_SQL_PORT=5432
+      - TEMPORAL_SQL_USER=admin
+      - TEMPORAL_SQL_DATABASE=${COPILOT_DSQL_DATABASE:-postgres}
+      - TEMPORAL_SQL_TLS_ENABLED=true
+      - TEMPORAL_SQL_IAM_AUTH=true
+      - TEMPORAL_SQL_MAX_CONNS=10
+      - TEMPORAL_SQL_MAX_IDLE_CONNS=10
+      - TEMPORAL_SQL_MAX_CONN_LIFETIME=55m
+      - TEMPORAL_SQL_CONNECTION_TIMEOUT=30s
+      - AWS_REGION=${AWS_REGION:-eu-west-1}
+      - TEMPORAL_SQL_AWS_REGION=${AWS_REGION:-eu-west-1}
+      - TEMPORAL_ADDRESS=0.0.0.0:7233
+      - TEMPORAL_HISTORY_SHARDS=4
+      - TEMPORAL_LOG_LEVEL=info
+      - DSQL_RESERVOIR_ENABLED=false
+      - DSQL_STAGGERED_STARTUP=false
+      - DSQL_TOKEN_DURATION=2m
+      - TEMPORAL_ELASTICSEARCH_HOST=elasticsearch
+      - TEMPORAL_ELASTICSEARCH_PORT=9200
+      - TEMPORAL_ELASTICSEARCH_SCHEME=http
+      - TEMPORAL_ELASTICSEARCH_VERSION=v8
+      - TEMPORAL_ELASTICSEARCH_INDEX=temporal_visibility_copilot_dev
+    ports:
+      - "7243:7233"
+    networks:
+      - temporal-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z copilot-temporal 7233 || nc -z $$(hostname -i) 7233"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  copilot-ui:
+    container_name: copilot-ui
+    platform: linux/arm64
+    image: temporalio/ui:latest
+    depends_on:
+      copilot-temporal:
+        condition: service_healthy
+    environment:
+      - TEMPORAL_ADDRESS=copilot-temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:8082
+    ports:
+      - "8082:8080"
+    networks:
+      - temporal-network
+    restart: unless-stopped
+
+  copilot-worker:
+    container_name: copilot-worker
+    platform: linux/arm64
+    image: temporal-sre-copilot:dev
+    pull_policy: never
+    depends_on:
+      copilot-temporal:
+        condition: service_healthy
+      loki:
+        condition: service_started
+      mimir:
+        condition: service_started
+    command: ["python", "-m", "copilot.worker"]
+    volumes:
+      - ~/.aws:/home/copilot/.aws:ro
+    environment:
+      - TEMPORAL_ADDRESS=copilot-temporal:7233
+      - MONITORED_TEMPORAL_ADDRESS=temporal-frontend:7233
+      - PROMETHEUS_ENDPOINT=http://mimir:9009/prometheus
+      - LOKI_URL=http://loki:3100
+      - COPILOT_DSQL_ENDPOINT=${COPILOT_DSQL_HOST}
+      - DSQL_DATABASE=${COPILOT_DSQL_DATABASE:-postgres}
+      - AWS_REGION=${AWS_REGION:-eu-west-1}
+      - AWS_SHARED_CREDENTIALS_FILE=/home/copilot/.aws/credentials
+      - AWS_CONFIG_FILE=/home/copilot/.aws/config
+      - KNOWLEDGE_BASE_ID=${COPILOT_KNOWLEDGE_BASE_ID:-}
+    networks:
+      - temporal-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8080/health\")' 2>/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  copilot-api:
+    container_name: copilot-api
+    hostname: copilot-api
+    platform: linux/arm64
+    image: temporal-sre-copilot:dev
+    pull_policy: never
+    depends_on:
+      copilot-temporal:
+        condition: service_healthy
+    command: ["granian", "--interface", "asgi", "copilot.api:app", "--host", "0.0.0.0", "--port", "8080"]
+    volumes:
+      - ~/.aws:/home/copilot/.aws:ro
+    environment:
+      - TEMPORAL_ADDRESS=copilot-temporal:7233
+      - COPILOT_DSQL_ENDPOINT=${COPILOT_DSQL_HOST}
+      - DSQL_DATABASE=${COPILOT_DSQL_DATABASE:-postgres}
+      - PROMETHEUS_ENDPOINT=http://mimir:9009/prometheus
+      - COPILOT_PROFILE_S3_BUCKET=${COPILOT_PROFILE_S3_BUCKET:-}
+      - AWS_REGION=${AWS_REGION:-eu-west-1}
+      - AWS_SHARED_CREDENTIALS_FILE=/home/copilot/.aws/credentials
+      - AWS_CONFIG_FILE=/home/copilot/.aws/config
+    ports:
+      - "8081:8080"
+    networks:
+      - temporal-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8080/status\")' 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+volumes:
+  elasticsearch-data:
+  mimir-data:
+  loki-data:
+  grafana-data:
+
+networks:
+  temporal-network:
+    driver: bridge

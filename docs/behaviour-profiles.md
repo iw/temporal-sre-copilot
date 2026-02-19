@@ -8,6 +8,36 @@ The Behaviour Profile API (`behaviour-profiles` package) snapshots a time window
 
 Profiles enable comparison ("healthy @ 150 WPS" vs "failed @ 400 WPS"), drift detection against a baseline, and preset conformance validation through the Copilot.
 
+## Configuration
+
+The profile API is mounted by the Copilot's FastAPI app and configured automatically during startup. It requires three things:
+
+| Requirement | Environment variable | Source |
+|-------------|---------------------|--------|
+| DSQL pool (metadata index) | `COPILOT_DSQL_ENDPOINT` | `copilot dev infra apply` → `copilot_dsql_endpoint` |
+| S3 bucket (full profile JSON) | `COPILOT_PROFILE_S3_BUCKET` | `copilot dev infra apply` → `profile_bucket` |
+| Prometheus-compatible endpoint (telemetry collection) | `PROMETHEUS_ENDPOINT` | Auto-configured in docker-compose to point at Mimir (`http://mimir:9009/prometheus`) |
+
+If `COPILOT_PROFILE_S3_BUCKET` or `PROMETHEUS_ENDPOINT` is missing, the profile router stays unconfigured and all `/profiles` endpoints return HTTP 503 with "Profile storage not configured".
+
+The DSQL `behaviour_profiles` table is created by `copilot dev schema setup` as part of the Copilot schema — no additional migration needed.
+
+### Local dev setup
+
+```bash
+# 1. Provision infrastructure (creates the profile S3 bucket)
+just copilot dev infra apply
+
+# 2. Add to dev/.env
+COPILOT_PROFILE_S3_BUCKET=<profile_bucket output from terraform>
+
+# 3. Restart copilot-api to pick up the new env var
+just copilot dev down
+just copilot dev up
+```
+
+Verify with `curl http://localhost:8081/profiles/` — you should get `[]` instead of a 503.
+
 ## Profile API
 
 The API is mounted by the Copilot at `/profiles/*`:

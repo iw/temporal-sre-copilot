@@ -1,0 +1,35 @@
+apiVersion: 1
+
+providers:
+  - name: 'Temporal Server'
+    orgId: 1
+    folder: 'Temporal'
+    folderUid: 'temporal'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards/server
+
+  - name: 'DSQL Persistence'
+    orgId: 1
+    folder: 'DSQL'
+    folderUid: 'dsql'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards/dsql
+
+  - name: 'SRE Copilot'
+    orgId: 1
+    folder: 'Copilot'
+    folderUid: 'copilot'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards/copilot

@@ -141,7 +141,15 @@ temporal-sre-copilot/
 │   ├── test_serialization.py
 │   └── test_workflow_sandbox.py
 │
+├── dev/                            # standalone dev environment
+│   ├── docker-compose.yml          # 15-service Docker Compose stack
+│   ├── config/                     # Loki, Alloy, Mimir, Grafana configs
+│   ├── docker/                     # Dockerfile, entrypoint, persistence template
+│   ├── dynamicconfig/              # Temporal dynamic config
+│   └── .env.example                # environment variable template
+│
 ├── terraform/                      # Modular infrastructure
+│   └── dev/                        # Ephemeral infra (DSQL clusters, Bedrock KB)
 ├── grafana/                        # Dashboards
 ├── docs/rag/                       # RAG corpus
 └── Dockerfile                      # Multi-stage build (Python 3.14)
@@ -223,14 +231,14 @@ Every workflow takes a single Pydantic `BaseModel` as input. Every activity take
 ```python
 # CORRECT: Single Pydantic model input
 class FetchSignalsInput(BaseModel):
-    amp_endpoint: str
+    prometheus_endpoint: str
 
 @activity.defn
 async def fetch_signals(input: FetchSignalsInput) -> Signals: ...
 
 # WRONG: Bare positional args
 @activity.defn
-async def fetch_signals(amp_endpoint: str) -> Signals: ...
+async def fetch_signals(prometheus_endpoint: str) -> Signals: ...
 ```
 
 ### Health State Machine
@@ -300,3 +308,62 @@ Full requirements, design, and tasks:
 
 - `.kiro/specs/temporal-sre-copilot/` — Copilot spec (requirements, design, tasks)
 - `.kiro/specs/enhance-config-ux/` — Config Compiler + Behaviour Profiles spec (requirements, design, tasks)
+- `.kiro/specs/standalone-dev/` — Standalone dev environment spec (requirements, design, tasks)
+
+## Standalone Dev Environment
+
+The `dev/` directory contains a self-contained Docker Compose stack for local Copilot development. It replaces the previous dependency on `temporal-dsql-deploy` for day-to-day development — only the `temporal-dsql` repo is still needed (for building the Go-based Temporal server image).
+
+### Directory Structure
+
+```
+dev/
+├── docker-compose.yml                          # 15 services on temporal-network
+├── .env.example                                # Environment variable template
+├── config/
+│   ├── loki.yaml                               # Loki: single-binary, 72h retention
+│   ├── alloy.alloy                             # Alloy: scrape 4 Temporal services, Docker logs
+│   ├── mimir.yaml                              # Mimir: single-binary, 500k series
+│   ├── grafana-datasources.yaml                # Prometheus, CloudWatch, Loki, Copilot API
+│   └── grafana-dashboards.yaml                 # 3 dashboard folders
+├── docker/
+│   ├── Dockerfile                              # Layers persistence config onto temporal-dsql
+│   ├── render-and-start.sh                     # Template renderer + entrypoint
+│   └── persistence-dsql-elasticsearch.template.yaml
+└── dynamicconfig/
+    └── development-dsql.yaml                   # DSQL optimizations, eager execution
+
+terraform/dev/
+├── main.tf                                     # 2 DSQL clusters, Bedrock KB, S3, IAM
+├── variables.tf                                # project_name, region
+└── outputs.tf                                  # DSQL endpoints, KB ID, bucket names
+```
+
+### Dev CLI Commands
+
+The `copilot dev` subcommand group (in `packages/copilot/src/copilot/cli/dev.py`) orchestrates the full lifecycle. In a uv workspace monorepo, the `--package` flag is required: `uv run --package temporal-sre-copilot copilot dev ...`. The Justfile provides `just copilot` as shorthand.
+
+```bash
+# Service lifecycle
+just copilot dev up              # Start all 15 services (detached)
+just copilot dev down            # Stop services
+just copilot dev down -v         # Stop + remove volumes
+just copilot dev ps              # Service status
+just copilot dev logs [service]  # Tail logs
+
+# Build
+just copilot dev build           # Build temporal-dsql-runtime:test + temporal-sre-copilot:dev
+
+# Schema
+just copilot dev schema setup    # Apply Temporal + Copilot schemas to both DSQL clusters + ES
+
+# Infrastructure
+just copilot dev infra apply     # Provision DSQL clusters + Bedrock KB via Terraform
+just copilot dev infra destroy   # Tear down ephemeral AWS resources
+```
+
+### Relationship to temporal-dsql-deploy
+
+- `temporal-dsql-deploy` is still used for production ECS deployments and benchmarking
+- `dev/` is a standalone fork of the copilot profile — configs can evolve independently
+- The `temporal-dsql` repo remains an external dependency for building the Temporal server binary

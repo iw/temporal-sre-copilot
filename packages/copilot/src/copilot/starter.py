@@ -16,10 +16,10 @@ Environment variables:
     TEMPORAL_ADDRESS   - Temporal server address (default: localhost:7233)
     TEMPORAL_NAMESPACE - Temporal namespace (default: default)
     COPILOT_TASK_QUEUE - Task queue name (default: copilot-task-queue)
-    AMP_ENDPOINT       - Amazon Managed Prometheus query endpoint
-    DSQL_ENDPOINT      - Aurora DSQL cluster endpoint
-    LOKI_URL           - Loki query endpoint
-    KNOWLEDGE_BASE_ID  - Bedrock Knowledge Base ID (optional)
+    PROMETHEUS_ENDPOINT    - Prometheus-compatible query endpoint
+    COPILOT_DSQL_ENDPOINT  - Copilot Aurora DSQL cluster endpoint
+    LOKI_URL               - Loki query endpoint
+    KNOWLEDGE_BASE_ID      - Bedrock Knowledge Base ID (optional)
 """
 
 import asyncio
@@ -49,16 +49,16 @@ async def start_workflows() -> None:
     namespace = os.environ.get("TEMPORAL_NAMESPACE", "default")
     task_queue = os.environ.get("COPILOT_TASK_QUEUE", COPILOT_TASK_QUEUE)
 
-    amp_endpoint = os.environ.get("AMP_ENDPOINT", "")
-    dsql_endpoint = os.environ.get("DSQL_ENDPOINT", "")
+    prometheus_endpoint = os.environ.get("PROMETHEUS_ENDPOINT", "")
+    dsql_endpoint = os.environ.get("COPILOT_DSQL_ENDPOINT", "")
     loki_url = os.environ.get("LOKI_URL", "")
     kb_id = os.environ.get("KNOWLEDGE_BASE_ID")
 
-    if not amp_endpoint:
-        logger.error("AMP_ENDPOINT is required")
+    if not prometheus_endpoint:
+        logger.error("PROMETHEUS_ENDPOINT is required")
         return
     if not dsql_endpoint:
-        logger.error("DSQL_ENDPOINT is required")
+        logger.error("COPILOT_DSQL_ENDPOINT is required")
         return
 
     client = await create_client(temporal_address, namespace)
@@ -68,7 +68,7 @@ async def start_workflows() -> None:
     await client.start_workflow(
         "ObserveClusterWorkflow",
         ObserveClusterInput(
-            amp_endpoint=amp_endpoint,
+            prometheus_endpoint=prometheus_endpoint,
             dsql_endpoint=dsql_endpoint,
         ),
         id=OBSERVE_WORKFLOW_ID,
@@ -96,7 +96,7 @@ async def start_workflows() -> None:
     await client.start_workflow(
         "ScheduledAssessmentWorkflow",
         ScheduledAssessmentInput(
-            amp_endpoint=amp_endpoint,
+            prometheus_endpoint=prometheus_endpoint,
             dsql_endpoint=dsql_endpoint,
             kb_id=kb_id,
             loki_url=loki_url or None,

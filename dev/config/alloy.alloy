@@ -1,0 +1,84 @@
+// Grafana Alloy configuration for Copilot profile
+// Scrapes Prometheus metrics from Temporal services AND ships container logs to Loki
+
+// =============================================================================
+// Metrics: Scrape Temporal services → Mimir
+// =============================================================================
+
+prometheus.scrape "temporal_history" {
+  targets         = [{ __address__ = "temporal-history:9090" }]
+  forward_to      = [prometheus.remote_write.mimir.receiver]
+  scrape_interval = "15s"
+  job_name        = "temporal-history"
+}
+
+prometheus.scrape "temporal_matching" {
+  targets         = [{ __address__ = "temporal-matching:9090" }]
+  forward_to      = [prometheus.remote_write.mimir.receiver]
+  scrape_interval = "15s"
+  job_name        = "temporal-matching"
+}
+
+prometheus.scrape "temporal_frontend" {
+  targets         = [{ __address__ = "temporal-frontend:9090" }]
+  forward_to      = [prometheus.remote_write.mimir.receiver]
+  scrape_interval = "15s"
+  job_name        = "temporal-frontend"
+}
+
+prometheus.scrape "temporal_worker" {
+  targets         = [{ __address__ = "temporal-worker:9090" }]
+  forward_to      = [prometheus.remote_write.mimir.receiver]
+  scrape_interval = "15s"
+  job_name        = "temporal-worker"
+}
+
+// Scrape SDK metrics from copilot test scripts running on the host.
+prometheus.scrape "copilot_test_worker" {
+  targets         = [{ __address__ = "host.docker.internal:9091" }]
+  forward_to      = [prometheus.remote_write.mimir.receiver]
+  scrape_interval = "15s"
+  scrape_timeout  = "10s"
+  job_name        = "copilot-test-worker"
+}
+
+prometheus.remote_write "mimir" {
+  endpoint {
+    url = "http://mimir:9009/api/v1/push"
+  }
+}
+
+// =============================================================================
+// Logs: Discover Docker containers → Loki
+// =============================================================================
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "docker_logs" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+}
+
+loki.source.docker "containers" {
+  host    = "unix:///var/run/docker.sock"
+  targets = discovery.relabel.docker_logs.output
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

@@ -1,6 +1,7 @@
 """Database CLI commands for the Temporal SRE Copilot."""
 
 import asyncio
+import os
 from pathlib import Path
 from typing import Annotated
 
@@ -41,18 +42,27 @@ async def execute_schema(endpoint: str, database: str, region: str, schema_sql: 
 
 @app.command()
 def setup_schema(
-    endpoint: Annotated[str, typer.Option("--endpoint", "-e", help="DSQL cluster endpoint")],
+    endpoint: Annotated[
+        str | None,
+        typer.Option("--endpoint", "-e", help="DSQL cluster endpoint"),
+    ] = None,
     database: Annotated[str, typer.Option("--database", "-d", help="Database name")] = "copilot",
     region: Annotated[str, typer.Option("--region", "-r", help="AWS region")] = "eu-west-1",
 ) -> None:
     """Apply the Copilot schema to Aurora DSQL.
 
-    Creates the health_assessments, issues, and metrics_snapshots tables
-    with appropriate indexes for the Copilot state store.
+    Creates the health_assessments, issues, metrics_snapshots, and
+    behaviour_profiles tables with appropriate indexes.
+
+    If --endpoint is not provided, falls back to the COPILOT_DSQL_ENDPOINT env var.
     """
+    resolved_endpoint = endpoint or os.environ.get("COPILOT_DSQL_ENDPOINT", "")
+    if not resolved_endpoint:
+        console.print("[red]Error:[/red] --endpoint or COPILOT_DSQL_ENDPOINT env var is required")
+        raise typer.Exit(1)
     console.print(Panel.fit("Setting up Copilot DSQL Schema", style="bold blue"))
 
-    console.print(f"  Endpoint: [cyan]{endpoint}[/cyan]")
+    console.print(f"  Endpoint: [cyan]{resolved_endpoint}[/cyan]")
     console.print(f"  Database: [cyan]{database}[/cyan]")
     console.print(f"  Region:   [cyan]{region}[/cyan]")
     console.print()
@@ -67,7 +77,7 @@ def setup_schema(
 
     with console.status("[bold green]Applying schema..."):
         try:
-            asyncio.run(execute_schema(endpoint, database, region, schema_sql))
+            asyncio.run(execute_schema(resolved_endpoint, database, region, schema_sql))
         except Exception as e:
             console.print(f"[red]Error:[/red] {e}")
             raise typer.Exit(1) from None

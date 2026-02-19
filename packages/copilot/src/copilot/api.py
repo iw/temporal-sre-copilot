@@ -60,7 +60,7 @@ async def _dsql_reset_connection(conn: asyncpg.Connection) -> None:
 
 async def _create_pool() -> asyncpg.Pool:
     """Create a DSQL pool with automatic IAM token refresh per connection."""
-    endpoint = os.environ.get("DSQL_ENDPOINT", "localhost")
+    endpoint = os.environ.get("COPILOT_DSQL_ENDPOINT", "localhost")
     logger.info("Creating DSQL pool via aurora_dsql_asyncpg (auto token refresh)")
     return await dsql.create_pool(
         user="admin",
@@ -343,10 +343,10 @@ async def lifespan(app: FastAPI):
     try:
         _pool = await _create_pool()
 
-        # Configure behaviour profile router if S3 bucket and AMP endpoint are set
+        # Configure behaviour profile router if S3 bucket and Prometheus endpoint are set
         s3_bucket = os.environ.get("COPILOT_PROFILE_S3_BUCKET")
-        amp_endpoint = os.environ.get("AMP_ENDPOINT")
-        if s3_bucket and amp_endpoint and _pool:
+        prometheus_endpoint = os.environ.get("PROMETHEUS_ENDPOINT")
+        if s3_bucket and prometheus_endpoint and _pool:
             try:
                 import aiobotocore.session
 
@@ -357,7 +357,7 @@ async def lifespan(app: FastAPI):
                 s3_client = await s3_ctx.__aenter__()
                 configure_profile_router(
                     storage=ProfileStorage(pool=_pool, s3_client=s3_client, bucket=s3_bucket),
-                    amp_endpoint=amp_endpoint,
+                    prometheus_endpoint=prometheus_endpoint,
                 )
                 logger.info("Behaviour profile API configured (bucket=%s)", s3_bucket)
             except Exception:

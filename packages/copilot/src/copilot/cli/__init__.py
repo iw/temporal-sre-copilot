@@ -3,6 +3,7 @@
 import typer
 
 from copilot.cli.db import app as db_app
+from copilot.cli.dev import app as dev_app
 from copilot.cli.kb import app as kb_app
 
 app = typer.Typer(
@@ -12,6 +13,7 @@ app = typer.Typer(
 )
 
 app.add_typer(db_app, name="db", help="Database operations")
+app.add_typer(dev_app, name="dev", help="Local development environment")
 app.add_typer(kb_app, name="kb", help="Knowledge base operations")
 
 

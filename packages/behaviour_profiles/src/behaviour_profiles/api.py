@@ -1,7 +1,7 @@
 """FastAPI router for Behaviour Profile CRUD and comparison.
 
 Endpoints:
-  POST   /profiles           — create a profile (query AMP, store in S3 + DSQL)
+  POST   /profiles           — create a profile (query Prometheus, store in S3 + DSQL)
   GET    /profiles           — list profiles with optional filters
   GET    /profiles/{id}      — retrieve full profile from S3
   POST   /profiles/{id}/baseline — designate as baseline
@@ -21,12 +21,9 @@ from behaviour_profiles.comparison import compare_profiles
 from behaviour_profiles.models import (
     BehaviourProfile,
     CompareRequest,
-    ConfigSnapshot,
     CreateProfileRequest,
-    DSQLPluginSnapshot,
     ProfileComparison,
     ProfileMetadata,
-    WorkerOptionsSnapshot,
 )
 
 if TYPE_CHECKING:
@@ -38,21 +35,21 @@ router = APIRouter(prefix="/profiles", tags=["profiles"])
 
 # These are set at mount time by the copilot app via `configure_profile_router`
 _storage: ProfileStorage | None = None
-_amp_endpoint: str | None = None
+_prometheus_endpoint: str | None = None
 
 
 def configure_profile_router(
     *,
     storage: ProfileStorage,
-    amp_endpoint: str,
+    prometheus_endpoint: str,
 ) -> None:
     """Inject dependencies into the profile router.
 
     Called by the copilot app during startup before mounting the router.
     """
-    global _storage, _amp_endpoint
+    global _storage, _prometheus_endpoint
     _storage = storage
-    _amp_endpoint = amp_endpoint
+    _prometheus_endpoint = prometheus_endpoint
 
 
 def _get_storage() -> ProfileStorage:
@@ -82,19 +79,22 @@ async def create_profile(request: CreateProfileRequest) -> ProfileMetadata:
             status_code=400, detail="time_window_end must be after time_window_start"
         )
 
-    if _amp_endpoint is None:
-        raise HTTPException(status_code=503, detail="AMP endpoint not configured")
+    if _prometheus_endpoint is None:
+        raise HTTPException(status_code=503, detail="Prometheus endpoint not configured")
 
     storage = _get_storage()
 
-    # Collect telemetry from AMP
+    # Collect telemetry from Prometheus
     telemetry = await collect_telemetry(
-        amp_endpoint=_amp_endpoint,
+        amp_endpoint=_prometheus_endpoint,
         start=request.time_window_start,
         end=request.time_window_end,
     )
 
-    # Build profile with empty config snapshot (config collection is separate)
+    # Config snapshot is not auto-collected — marked None to distinguish
+    # "not collected" from "collected but empty". Config collection requires
+    # querying the monitored cluster's dynamic config and env vars, which
+    # is a separate operation (future: POST /profiles/{id}/config).
     profile = BehaviourProfile(
         id=str(uuid.uuid4()),
         name=request.name,
@@ -104,24 +104,7 @@ async def create_profile(request: CreateProfileRequest) -> ProfileMetadata:
         task_queue=request.task_queue,
         time_window_start=request.time_window_start,
         time_window_end=request.time_window_end,
-        config_snapshot=ConfigSnapshot(
-            dynamic_config=[],
-            server_env_vars=[],
-            worker_options=WorkerOptionsSnapshot(),
-            dsql_plugin_config=DSQLPluginSnapshot(
-                reservoir_enabled=False,
-                reservoir_target_ready=0,
-                reservoir_base_lifetime_min=0,
-                reservoir_lifetime_jitter_min=0,
-                reservoir_guard_window_sec=0,
-                max_conns=0,
-                max_idle_conns=0,
-                max_conn_lifetime_min=0,
-                distributed_rate_limiter_enabled=False,
-                token_bucket_enabled=False,
-                slot_block_enabled=False,
-            ),
-        ),
+        config_snapshot=None,
         telemetry=telemetry,
         created_at=Instant.now().format_iso(),
     )

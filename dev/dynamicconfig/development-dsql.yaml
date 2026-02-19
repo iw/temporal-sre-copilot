@@ -1,0 +1,57 @@
+# Dynamic configuration for Aurora DSQL development environment
+
+system.enableActivityEagerExecution:
+  - value: true
+    constraints: {}
+
+system.enableReadFromClosedExecutionV2:
+  - value: true
+    constraints: {}
+
+system.advancedVisibilityWritingMode:
+  - value: "on"
+    constraints: {}
+
+system.enableReadVisibilityFromES:
+  - value: true
+    constraints: {}
+
+system.enableLogCustomerQueryParameter:
+  - value: true
+    constraints: {}
+
+history.persistenceMaxQPS:
+  - value: 6000
+    constraints: {}
+
+matching.persistenceMaxQPS:
+  - value: 6000
+    constraints: {}
+
+frontend.persistenceMaxQPS:
+  - value: 6000
+    constraints: {}
+
+persistence.maxConns:
+  - value: 50
+    constraints: {}
+
+persistence.maxIdleConns:
+  - value: 50
+    constraints: {}
+
+persistence.transactionSizeLimit:
+  - value: 4000000
+    constraints: {}
+
+history.maxBufferedQueryCount:
+  - value: 1000
+    constraints: {}
+
+matching.numTaskqueueReadPartitions:
+  - value: 8
+    constraints: {}
+
+matching.numTaskqueueWritePartitions:
+  - value: 8
+    constraints: {}

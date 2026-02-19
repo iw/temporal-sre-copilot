@@ -12,7 +12,7 @@ dependencies = [
     "pydantic-settings>=2.10",
     "temporalio>=1.20",
     "fastapi>=0.115",
-    "uvicorn>=0.34",
+    "granian>=1.6",
     "httpx>=0.28",
     "boto3>=1.36",
     "asyncpg>=0.30",
@@ -20,6 +20,12 @@ dependencies = [
     "typer>=0.15",
     "rich>=13.9",
     "whenever>=0.9.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "dagger-io>=0.19",
+    "anyio>=4.9",
 ]
 
 [project.scripts]

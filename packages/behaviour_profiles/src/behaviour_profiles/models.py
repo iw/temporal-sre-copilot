@@ -142,7 +142,7 @@ class BehaviourProfile(BaseModel):
     dsql_plugin_version: VersionType | None = None
     worker_code_sha: str | None = None
 
-    config_snapshot: ConfigSnapshot
+    config_snapshot: ConfigSnapshot | None = None
     telemetry: TelemetrySummary
 
     created_at: str

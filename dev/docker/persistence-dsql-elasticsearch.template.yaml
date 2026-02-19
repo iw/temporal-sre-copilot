@@ -1,0 +1,90 @@
+persistence:
+  defaultStore: dsql-default
+  visibilityStore: esdefault
+  advancedVisibilityStore: esdefault
+  numHistoryShards: $TEMPORAL_HISTORY_SHARDS
+  datastores:
+    dsql-default:
+      sql:
+        pluginName: $TEMPORAL_SQL_PLUGIN_NAME
+        databaseName: $TEMPORAL_SQL_DATABASE
+        connectAddr: $TEMPORAL_SQL_HOST:$TEMPORAL_SQL_PORT
+        connectProtocol: tcp
+        user: $TEMPORAL_SQL_USER
+        maxConns: $TEMPORAL_SQL_MAX_CONNS
+        maxIdleConns: $TEMPORAL_SQL_MAX_IDLE_CONNS
+        connectionTimeout: $TEMPORAL_SQL_CONNECTION_TIMEOUT
+        maxConnLifetime: $TEMPORAL_SQL_MAX_CONN_LIFETIME
+        tls:
+          enabled: $TEMPORAL_SQL_TLS_ENABLED
+    esdefault:
+      elasticsearch:
+        version: $TEMPORAL_ELASTICSEARCH_VERSION
+        url:
+          scheme: "$TEMPORAL_ELASTICSEARCH_SCHEME"
+          host: "$TEMPORAL_ELASTICSEARCH_HOST:$TEMPORAL_ELASTICSEARCH_PORT"
+        disableSniff: true
+        logLevel: error
+        indices:
+          visibility: $TEMPORAL_ELASTICSEARCH_INDEX
+
+global:
+  membership:
+    maxJoinDuration: 30s
+  pprof:
+    port: 7936
+  metrics:
+    prometheus:
+      framework: opentelemetry
+      timerType: histogram
+      listenAddress: "0.0.0.0:9090"
+
+services:
+  frontend:
+    rpc:
+      grpcPort: 7233
+      membershipPort: 6933
+      bindOnLocalHost: false
+      httpPort: 8233
+  matching:
+    rpc:
+      grpcPort: 7235
+      membershipPort: 6935
+      bindOnLocalHost: false
+  history:
+    rpc:
+      grpcPort: 7234
+      membershipPort: 6934
+      bindOnLocalHost: false
+  worker:
+    rpc:
+      grpcPort: 7239
+      membershipPort: 6939
+      bindOnLocalHost: false
+
+clusterMetadata:
+  enableGlobalNamespace: false
+  failoverVersionIncrement: 10
+  masterClusterName: "active"
+  currentClusterName: "active"
+  clusterInformation:
+    active:
+      enabled: true
+      initialFailoverVersion: 1
+      rpcAddress: "temporal-frontend:7233"
+
+dcRedirectionPolicy:
+  policy: "noop"
+
+archival:
+  history:
+    state: "disabled"
+  visibility:
+    state: "disabled"
+
+publicClient:
+  hostPort: "temporal-frontend:7233"
+
+dynamicConfigClient:
+  filepath: "/etc/temporal/config/dynamicconfig/development-dsql.yaml"
+  pollInterval: "10s"

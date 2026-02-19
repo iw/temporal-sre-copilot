@@ -1,0 +1,1580 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": false,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Aurora DSQL persistence metrics",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "iteration": 1,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [
+        "temporal"
+      ],
+      "targetBlank": true,
+      "title": "Temporal Server Dashboard",
+      "type": "dashboards"
+    }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 100,
+      "type": "text",
+      "title": "How to Read This Dashboard",
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "## DSQL Persistence: What You Are Looking At\n\nThis deployment uses a **non-blocking Connection Reservoir** to ensure `driver.Open()` never waits on DSQL's global connection creation constraints.\n\n### Mental Model\n- **Reservoir** = pre-created, authenticated physical connections (fast, in-memory checkout)\n- **database/sql pool** = logical borrower/returner of connections\n- **Refiller** = background goroutine that creates physical connections (this is where global rate limits apply)\n- **ScanAndEvict** = continuously removes aged connections so expiry is smooth (no thundering herd)\n\n### Debug order\n1. **Empty Events** should be ~0 (Open() never blocks; empties imply \"buffer underflow\").\n2. **Reservoir Size vs Target**: size should track target with small oscillations.\n3. **Discards by reason**: should be dominated by expected expiry, not errors.\n4. **Persistence latency p95**: if high while reservoir is healthy, the bottleneck is not connection supply."
+      }
+    },
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Connections",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 101,
+      "type": "text",
+      "title": "Reservoir Semantics",
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "### Reservoir Semantics (Key Invariant)\n\n**Goal:** `driver.Open()` must be instantaneous and must **never block on global rate limiting**.\n\n- **Checkouts** should track workload demand.\n- **Refills** are supply-side and happen off the request path.\n- **Empty Events** should be **zero** in steady state. Treat any sustained non-zero as a correctness/SLO issue.\n\n**Healthy steady-state:**\n- Reservoir size \u2248 target\n- Refills/sec \u2248 discards/sec (over time)\n- Checkout p95 < 1ms"
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Available",
+      "description": "Connections ready for use (reservoir preferred; falls back to pool idle if reservoir metric missing).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "green",
+                "value": 30
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(dsql_reservoir_size) or sum(dsql_pool_idle) or vector(0)"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "In Use",
+      "description": "Active connections currently executing queries.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(dsql_pool_in_use) or vector(0)"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Checkout p95",
+      "description": "Reservoir checkout should be sub-ms. If this grows, checkout path is blocking or contended.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(dsql_reservoir_checkout_latency_milliseconds_bucket[1m])))"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Refills/min",
+      "description": "Background supply rate. Spikes during recovery; steady state is usually low.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(dsql_reservoir_refills_total[1m])) * 60 or vector(0)"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Empty Events",
+      "description": "Should be 0. Any sustained non-zero means Open() fell back and the reservoir underflowed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(dsql_reservoir_empty_total[5m])) or vector(0)"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Target",
+      "description": "Configured reservoir target (or pool max open as fallback).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(dsql_reservoir_target) or sum(dsql_pool_max_open) or vector(0)"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Reservoir Size",
+      "description": "Size should track target. Temporary dips are OK; sustained dips increase risk of Empty Events.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "target"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "size"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(dsql_reservoir_target)",
+          "legendFormat": "target"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(dsql_reservoir_size)",
+          "legendFormat": "size"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Checkout Latency",
+      "description": "Should remain flat as load increases. If it rises, reservoir path is contended or blocking.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "showPoints": "never"
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(dsql_reservoir_checkout_latency_milliseconds_bucket[1m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(dsql_reservoir_checkout_latency_milliseconds_bucket[1m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(dsql_reservoir_checkout_latency_milliseconds_bucket[1m])))",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Refills & Checkouts",
+      "description": "Checkouts track demand. Refills track supply. Empty/sec should be ~0.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "showPoints": "never"
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(dsql_reservoir_checkouts_total[1m]))",
+          "legendFormat": "checkouts/sec"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(dsql_reservoir_refills_total[1m]))",
+          "legendFormat": "refills/sec"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(rate(dsql_reservoir_empty_total[1m]))",
+          "legendFormat": "empty/sec"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Discards",
+      "description": "Discard reasons explain why physical connections leave the reservoir (expiry should dominate).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "showPoints": "never"
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (reason) (rate(dsql_reservoir_discards_total[1m]))",
+          "legendFormat": "{{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "type": "text",
+      "title": "ScanAndEvict: What to Expect",
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "### ScanAndEvict (Continuous Aged Connection Removal)\n\n`ScanAndEvict` prevents **burst expiry** by continuously removing aged connections.\n\n**Expected behavior:**\n- Discards occur steadily over time (not in spikes)\n- Refills keep reservoir near target\n- Empty events remain 0\n\n**If you see spikes in discards:**\n- A large cohort may share similar expiry timestamps (warmup too synchronous)\n- The eviction scan interval may be too large\n\n**If refills cannot keep up:**\n- You are rate-limited globally (100/sec) or blocked by global connection leases\n- Reservoir target may be too high for cluster constraints"
+      }
+    },
+    {
+      "id": 40,
+      "type": "row",
+      "title": "Distributed Coordination",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 41,
+      "type": "stat",
+      "title": "Slot Blocks Owned",
+      "description": "Number of slot blocks owned by this service. Each block provides 100 connection slots.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 31
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "N/A"
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(dsql_slot_blocks_owned{service_name!=\"server\"}) or vector(0)"
+        }
+      ]
+    },
+    {
+      "id": 42,
+      "type": "stat",
+      "title": "Slots Used",
+      "description": "Connection slots currently in use across all owned blocks.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 31
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "N/A"
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(dsql_slot_blocks_slots_used{service_name!=\"server\"}) or vector(0)"
+        }
+      ]
+    },
+    {
+      "id": 43,
+      "type": "stat",
+      "title": "Slot Utilization",
+      "description": "Percentage of owned slots currently in use. Should be < 100%.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 31
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.8
+              },
+              {
+                "color": "red",
+                "value": 0.95
+              }
+            ]
+          },
+          "noValue": "N/A"
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(dsql_slot_blocks_slots_used{service_name!=\"server\"}) / (sum(dsql_slot_blocks_owned{service_name!=\"server\"}) * 100) or vector(0)"
+        }
+      ]
+    },
+    {
+      "id": 44,
+      "type": "stat",
+      "title": "Refiller In-Flight",
+      "description": "Concurrent Open() calls in the refiller. Limited by DSQL_RESERVOIR_INFLIGHT_LIMIT (default: 8).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 31
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 6
+              },
+              {
+                "color": "red",
+                "value": 8
+              }
+            ]
+          },
+          "noValue": "0"
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(dsql_refiller_inflight{service_name!=\"server\"}) or vector(0)"
+        }
+      ]
+    },
+    {
+      "id": 45,
+      "type": "timeseries",
+      "title": "Slot Block Usage Over Time",
+      "description": "Tracks slot block ownership and usage over time.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 35
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "showPoints": "never"
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(dsql_slot_blocks_owned{service_name!=\"server\"}) * 100",
+          "legendFormat": "total slots"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(dsql_slot_blocks_slots_used{service_name!=\"server\"})",
+          "legendFormat": "slots used"
+        }
+      ]
+    },
+    {
+      "id": 46,
+      "type": "timeseries",
+      "title": "Refiller In-Flight Over Time",
+      "description": "Concurrent connection creation attempts. Spikes indicate burst activity.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 35
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "showPoints": "never"
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(dsql_refiller_inflight{service_name!=\"server\"})",
+          "legendFormat": "in-flight"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "row",
+      "title": "Persistence",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 103,
+      "type": "text",
+      "title": "Reading Persistence Panels",
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 42
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "### Persistence Interpretation\n\nIf reservoir health is good (size\u2248target, empty\u22480, checkout p95 <1ms), then high p95/p99 is likely due to:\n- DSQL transaction conflicts (OCC retries)\n- expensive persistence operations\n- downstream visibility/indexing\n\nStart with **Latency by Operation (p95)** to identify the dominant operations under load."
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Latency by Operation (p95)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 45
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "showPoints": "never"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(8, histogram_quantile(0.95, sum by (operation, le) (rate(persistence_latency_milliseconds_bucket[5m]))))",
+          "legendFormat": "{{operation}}"
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Request Rate",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 45
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "showPoints": "never"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(8, sum by (operation) (rate(persistence_requests_total[1m])))",
+          "legendFormat": "{{operation}}"
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Errors",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 53
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "showPoints": "never"
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (operation) (rate(persistence_errors_total[1m]))",
+          "legendFormat": "{{operation}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (error_type) (rate(persistence_error_with_type_total[1m]))",
+          "legendFormat": "{{error_type}}"
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "type": "row",
+      "title": "OCC Conflicts",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 59
+      },
+      "collapsed": true,
+      "panels": [
+        {
+          "id": 31,
+          "type": "stat",
+          "title": "Conflicts/sec",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 49
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 10
+                  },
+                  {
+                    "color": "red",
+                    "value": 50
+                  }
+                ]
+              },
+              "noValue": "0"
+            }
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "colorMode": "value",
+            "graphMode": "area"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(dsql_tx_conflict_total[1m])) or vector(0)"
+            }
+          ]
+        },
+        {
+          "id": 32,
+          "type": "stat",
+          "title": "Retries/sec",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 49
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 20
+                  },
+                  {
+                    "color": "red",
+                    "value": 100
+                  }
+                ]
+              },
+              "noValue": "0"
+            }
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "colorMode": "value",
+            "graphMode": "area"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(dsql_tx_retry_total[1m])) or vector(0)"
+            }
+          ]
+        },
+        {
+          "id": 33,
+          "type": "stat",
+          "title": "Exhausted",
+          "description": "Should be 0",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 12,
+            "y": 49
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 0.1
+                  }
+                ]
+              },
+              "noValue": "0"
+            }
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "colorMode": "value",
+            "graphMode": "area"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(dsql_tx_exhausted_total[1m])) or vector(0)"
+            }
+          ]
+        },
+        {
+          "id": 34,
+          "type": "timeseries",
+          "title": "Conflicts Over Time",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 24,
+            "x": 0,
+            "y": 53
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "custom": {
+                "showPoints": "never"
+              }
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(dsql_tx_conflict_total[1m]))",
+              "legendFormat": "conflicts"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(dsql_tx_retry_total[1m]))",
+              "legendFormat": "retries"
+            },
+            {
+              "refId": "C",
+              "expr": "sum(rate(dsql_tx_exhausted_total[1m]))",
+              "legendFormat": "exhausted"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "row",
+      "title": "CloudWatch Metrics (AWS)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 68
+      },
+      "collapsed": true,
+      "panels": [
+        {
+          "id": 22,
+          "type": "text",
+          "title": "CloudWatch Setup",
+          "gridPos": {
+            "h": 3,
+            "w": 24,
+            "x": 0,
+            "y": 58
+          },
+          "options": {
+            "mode": "markdown",
+            "content": "**Setup Required**: Enter your DSQL cluster ID in the dashboard variable above. Ensure Grafana has CloudWatch IAM permissions (`cloudwatch:GetMetricData`). CloudWatch queries incur costs (~$5-15/month for a single cluster)."
+          }
+        },
+        {
+          "id": 23,
+          "type": "timeseries",
+          "title": "DSQL Throughput",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 53
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "custom": {
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "cloudwatch",
+                "uid": "cloudwatch"
+              },
+              "queryMode": "Metrics",
+              "metricQueryType": 0,
+              "metricEditorMode": 0,
+              "namespace": "AWS/AuroraDSQL",
+              "metricName": "BytesRead",
+              "statistic": "Sum",
+              "dimensions": {
+                "ClusterId": "${dsql_cluster:raw}"
+              },
+              "matchExact": true,
+              "period": "",
+              "region": "default",
+              "label": "bytes read"
+            },
+            {
+              "refId": "B",
+              "datasource": {
+                "type": "cloudwatch",
+                "uid": "cloudwatch"
+              },
+              "queryMode": "Metrics",
+              "metricQueryType": 0,
+              "metricEditorMode": 0,
+              "namespace": "AWS/AuroraDSQL",
+              "metricName": "BytesWritten",
+              "statistic": "Sum",
+              "dimensions": {
+                "ClusterId": "${dsql_cluster:raw}"
+              },
+              "matchExact": true,
+              "period": "",
+              "region": "default",
+              "label": "bytes written"
+            }
+          ]
+        },
+        {
+          "id": 24,
+          "type": "timeseries",
+          "title": "DSQL Commit Latency",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 53
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ms",
+              "custom": {
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "cloudwatch",
+                "uid": "cloudwatch"
+              },
+              "queryMode": "Metrics",
+              "metricQueryType": 0,
+              "metricEditorMode": 0,
+              "namespace": "AWS/AuroraDSQL",
+              "metricName": "CommitLatency",
+              "statistic": "Average",
+              "dimensions": {
+                "ClusterId": "${dsql_cluster:raw}"
+              },
+              "matchExact": true,
+              "period": "",
+              "region": "default",
+              "label": "commit latency (avg)"
+            },
+            {
+              "refId": "B",
+              "datasource": {
+                "type": "cloudwatch",
+                "uid": "cloudwatch"
+              },
+              "queryMode": "Metrics",
+              "metricQueryType": 0,
+              "metricEditorMode": 0,
+              "namespace": "AWS/AuroraDSQL",
+              "metricName": "TotalTransactions",
+              "statistic": "Sum",
+              "dimensions": {
+                "ClusterId": "${dsql_cluster:raw}"
+              },
+              "matchExact": true,
+              "period": "",
+              "region": "default",
+              "label": "transactions"
+            }
+          ]
+        },
+        {
+          "id": 25,
+          "type": "timeseries",
+          "title": "DSQL DPU Usage",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 61
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "cloudwatch",
+                "uid": "cloudwatch"
+              },
+              "queryMode": "Metrics",
+              "metricQueryType": 0,
+              "metricEditorMode": 0,
+              "namespace": "AWS/AuroraDSQL",
+              "metricName": "TotalDPU",
+              "statistic": "Sum",
+              "dimensions": {
+                "ClusterId": "${dsql_cluster:raw}"
+              },
+              "matchExact": true,
+              "period": "",
+              "region": "default",
+              "label": "total DPU"
+            },
+            {
+              "refId": "B",
+              "datasource": {
+                "type": "cloudwatch",
+                "uid": "cloudwatch"
+              },
+              "queryMode": "Metrics",
+              "metricQueryType": 0,
+              "metricEditorMode": 0,
+              "namespace": "AWS/AuroraDSQL",
+              "metricName": "ReadDPU",
+              "statistic": "Sum",
+              "dimensions": {
+                "ClusterId": "${dsql_cluster:raw}"
+              },
+              "matchExact": true,
+              "period": "",
+              "region": "default",
+              "label": "read DPU"
+            },
+            {
+              "refId": "C",
+              "datasource": {
+                "type": "cloudwatch",
+                "uid": "cloudwatch"
+              },
+              "queryMode": "Metrics",
+              "metricQueryType": 0,
+              "metricEditorMode": 0,
+              "namespace": "AWS/AuroraDSQL",
+              "metricName": "WriteDPU",
+              "statistic": "Sum",
+              "dimensions": {
+                "ClusterId": "${dsql_cluster:raw}"
+              },
+              "matchExact": true,
+              "period": "",
+              "region": "default",
+              "label": "write DPU"
+            }
+          ]
+        },
+        {
+          "id": 26,
+          "type": "timeseries",
+          "title": "DSQL OCC Conflicts",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 61
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "cloudwatch",
+                "uid": "cloudwatch"
+              },
+              "queryMode": "Metrics",
+              "metricQueryType": 0,
+              "metricEditorMode": 0,
+              "namespace": "AWS/AuroraDSQL",
+              "metricName": "OccConflicts",
+              "statistic": "Sum",
+              "dimensions": {
+                "ClusterId": "${dsql_cluster:raw}"
+              },
+              "matchExact": true,
+              "period": "",
+              "region": "default",
+              "label": "OCC conflicts"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": [
+    "temporal",
+    "dsql",
+    "persistence",
+    "aurora"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "dsql_cluster",
+        "label": "DSQL Cluster ID",
+        "type": "textbox",
+        "description": "Aurora DSQL cluster identifier for CloudWatch metrics (optional)",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        }
+      }
+    ]
+  },
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m"
+    ],
+    "time_options": [
+      "5m",
+      "15m",
+      "30m",
+      "1h",
+      "6h"
+    ]
+  },
+  "timezone": "browser",
+  "title": "DSQL Persistence",
+  "uid": "dsql-persistence",
+  "version": 1,
+  "weekStart": ""
+}

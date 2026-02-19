@@ -366,12 +366,12 @@ class TestActivityInputSerialization:
     """Test all activity input models survive the Temporal round-trip."""
 
     def test_fetch_signals_input(self):
-        original = FetchSignalsInput(amp_endpoint="http://mimir:9009/prometheus")
+        original = FetchSignalsInput(prometheus_endpoint="http://mimir:9009/prometheus")
         restored, _ = _temporal_round_trip(original)
         assert restored == original
 
     def test_fetch_worker_signals_input(self):
-        original = FetchWorkerSignalsInput(amp_endpoint="http://mimir:9009/prometheus")
+        original = FetchWorkerSignalsInput(prometheus_endpoint="http://mimir:9009/prometheus")
         restored, _ = _temporal_round_trip(original)
         assert restored == original
 
@@ -490,7 +490,7 @@ class TestWorkflowInputSerialization:
 
     def test_observe_cluster_input(self):
         original = ObserveClusterInput(
-            amp_endpoint="http://mimir:9009/prometheus",
+            prometheus_endpoint="http://mimir:9009/prometheus",
             dsql_endpoint="test.dsql.eu-west-1.on.aws",
         )
         restored, _ = _temporal_round_trip(original)
@@ -550,7 +550,7 @@ class TestWorkflowInputSerialization:
 
     def test_scheduled_assessment_input(self):
         original = ScheduledAssessmentInput(
-            amp_endpoint="http://mimir:9009/prometheus",
+            prometheus_endpoint="http://mimir:9009/prometheus",
             dsql_endpoint="test.dsql.eu-west-1.on.aws",
             kb_id="AEIQPURDHQ",
             loki_url="http://loki:3100",

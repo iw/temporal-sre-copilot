@@ -1,0 +1,1219 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": false,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Temporal Server dashboard for monitoring workflow progress, service health, and persistence performance.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "iteration": 1,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "Dashboard Guide",
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "## Temporal Server Health Dashboard\n\nThis dashboard answers three key questions:\n\n1. **Are workflows making progress?** \u2192 Check Service Requests and Workflow Outcomes\n2. **Is the History service keeping up?** \u2192 Check Task Processing and Shard Health\n3. **Is persistence a bottleneck?** \u2192 Check Persistence Latency and DSQL Metrics\n\n**Troubleshooting flow**: If service requests look normal but workflows aren't completing, check History tasks \u2192 then Persistence."
+      }
+    },
+    {
+      "id": 100,
+      "type": "row",
+      "title": "State Transitions & Persistence Overview",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 101,
+      "type": "timeseries",
+      "title": "Cluster-wide state transitions per/sec",
+      "description": "Measures how busy the workflow state machine is. This is NOT workflow completions - a single workflow may generate many state transitions (activity starts, completions, timers, signals). Use this to gauge overall system load and compare against baseline.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "showPoints": "never",
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(state_transition_count_ratio_sum[1m]))",
+          "legendFormat": "state transitions/sec"
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "type": "timeseries",
+      "title": "History-service state transitions per/sec",
+      "description": "State transitions processed by the History service. This drives workflow state machine progression. Compare with cluster-wide to see History's contribution.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "showPoints": "never",
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(state_transition_count_ratio_sum{service_name=~\"history.*\"}[1m]))",
+          "legendFormat": "history transitions/sec"
+        }
+      ]
+    },
+    {
+      "id": 103,
+      "type": "timeseries",
+      "title": "All persistence requests/sec (history)",
+      "description": "Total persistence operations from the History service. High rates indicate heavy database load.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "showPoints": "never",
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(persistence_requests_total{service_name=\"history\"}[1m]))",
+          "legendFormat": "persistence req/sec"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "row",
+      "title": "Service Health Overview",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Service Request Rate",
+      "description": "Total gRPC requests per second across all services. A sudden drop may indicate connectivity issues or service crashes.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 15
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(service_requests_total{namespace=~\"$namespace\"}[1m]))",
+          "legendFormat": "requests/sec"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Service Error Rate",
+      "description": "Errors per second. Non-zero values warrant investigation. Check service_error_with_type for error breakdown.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 15
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.1
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(service_error_with_type_total{namespace=~\"$namespace\"}[1m]))",
+          "legendFormat": "errors/sec"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Workflow Success Rate",
+      "description": "Workflows completing successfully per minute. This is your primary indicator of system health.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 15
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(workflow_success_total{namespace=~\"$namespace\"}[1m])) * 60",
+          "legendFormat": "success/min"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Workflow Failures",
+      "description": "Workflows failing per minute. Includes failures, timeouts, and terminations. Non-zero may indicate application issues.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 15
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(workflow_failed_total{namespace=~\"$namespace\"}[1m]) + rate(workflow_timeout_total{namespace=~\"$namespace\"}[1m]) + rate(workflow_terminate_total{namespace=~\"$namespace\"}[1m])) * 60",
+          "legendFormat": "failures/min"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Service Requests by Operation",
+      "description": "Request rate broken down by operation. Helps identify which operations are driving load. Common operations: StartWorkflowExecution, RespondWorkflowTaskCompleted, RecordActivityTaskHeartbeat.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 19
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(10, sum by (operation) (rate(service_requests_total{namespace=~\"$namespace\"}[1m])))",
+          "legendFormat": "{{operation}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Service Latency p95 by Service",
+      "description": "95th percentile latency for each Temporal service. Note: Frontend p95 of 60-90s is normal due to long-poll operations (PollWorkflowTaskQueue, PollActivityTaskQueue) which wait for work. Focus on History/Matching latency for actual performance issues.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 19
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (service_name, le) (rate(service_latency_milliseconds_bucket{namespace=~\"$namespace\"}[5m])))",
+          "legendFormat": "{{service_name}}"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "text",
+      "title": "Service Health Interpretation",
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 27
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Reading these metrics**: Service requests show user-visible load. If requests are steady but latency rises, check History and Persistence sections. Error spikes without latency changes often indicate client-side issues or invalid requests. Use `service_error_with_type` metric for detailed error breakdown."
+      }
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "History Service & Task Processing",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "History Task Processing Rate",
+      "description": "Rate of internal history tasks being processed. These tasks drive workflow state transitions. A drop here while service requests remain steady indicates History is falling behind.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 31
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(task_requests_total{service_name=\"history\"}[1m]))",
+          "legendFormat": "task_requests"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(task_errors_total{service_name=\"history\"}[1m]))",
+          "legendFormat": "task_errors"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Task Processing Latency",
+      "description": "Time to process history tasks. task_latency_processing = single attempt. task_latency = all attempts. task_latency_queue = end-to-end from generation. Rising latency here often precedes visible service degradation.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 31
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(task_latency_processing_milliseconds_bucket{service_name=\"history\"}[5m])))",
+          "legendFormat": "processing p95"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(task_latency_queue_milliseconds_bucket{service_name=\"history\"}[5m])))",
+          "legendFormat": "queue p95 (e2e)"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Task Attempts Distribution",
+      "description": "Number of attempts per task. Tasks retry on transient failures. High attempt counts indicate persistent issues (persistence errors, workflow lock contention). Healthy systems show most tasks completing in 1 attempt.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 39
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(task_attempt_ratio_bucket{service_name=\"history\"}[5m])))",
+          "legendFormat": "p50 attempts"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(task_attempt_ratio_bucket{service_name=\"history\"}[5m])))",
+          "legendFormat": "p95 attempts"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(task_attempt_ratio_bucket{service_name=\"history\"}[5m])))",
+          "legendFormat": "p99 attempts"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Shard Health",
+      "description": "Shard ownership changes indicate cluster membership churn. High churn during steady load suggests deployment issues or insufficient History replicas. Queue lag shows how far behind task processing is.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 39
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(sharditem_created_count_total[5m]))",
+          "legendFormat": "shards_created/sec"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(sharditem_removed_count_total[5m]))",
+          "legendFormat": "shards_removed/sec"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(rate(shard_closed_count_total[5m]))",
+          "legendFormat": "shards_closed/sec"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "type": "text",
+      "title": "History Service Interpretation",
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 47
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Reading these metrics**: History tasks are the engine of workflow execution. If task processing rate drops while service requests stay steady, workflows will stall. High task attempts (>2) indicate retries due to errors. Shard churn during steady state suggests ringpop membership issues - check cluster_membership table and service logs."
+      }
+    },
+    {
+      "id": 16,
+      "type": "row",
+      "title": "Persistence Layer",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 50
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Persistence Request Rate",
+      "description": "Database operations per second. High rates may indicate inefficient workflow patterns (too many activities, frequent heartbeats). Compare with service request rate to understand amplification.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 51
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(10, sum by (operation) (rate(persistence_requests_total[1m])))",
+          "legendFormat": "{{operation}}"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Persistence Latency p95",
+      "description": "95th percentile database latency by operation. Rising latency here is often the root cause of History task slowdowns. For DSQL, watch for spikes during high-concurrency periods.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 51
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(5, histogram_quantile(0.95, sum by (operation, le) (rate(persistence_latency_milliseconds_bucket[5m]))))",
+          "legendFormat": "{{operation}}"
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Persistence Errors",
+      "description": "Database errors by type. Connection errors indicate network/availability issues. For DSQL, serialization_failure (40001) errors trigger automatic retries - some are expected under load.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 59
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (operation) (rate(persistence_errors_total[1m]))",
+          "legendFormat": "{{operation}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (error_type) (rate(persistence_error_with_type_total[1m]))",
+          "legendFormat": "type: {{error_type}}"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "text",
+      "title": "Persistence Interpretation",
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 67
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Reading these metrics**: Persistence is often the bottleneck. Rising p95 latency (>50ms for most operations) will cascade into History task delays. For DSQL specifically, watch for connection pool exhaustion and serialization conflicts. If errors spike, check the **DSQL Persistence** dashboard for detailed metrics."
+      }
+    },
+    {
+      "id": 21,
+      "type": "row",
+      "title": "Matching Service & Task Queues",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 70
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Task Queue Polling",
+      "description": "Worker polling activity. poll_success = tasks delivered to workers. poll_timeouts = workers waiting with no work. High timeouts with pending workflows may indicate task queue mismatch.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 71
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(poll_success_total[1m]))",
+          "legendFormat": "poll_success"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(poll_timeouts_total[1m]))",
+          "legendFormat": "poll_timeouts"
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Async Match Latency",
+      "description": "Time from task creation to worker pickup for async-matched tasks. High latency means tasks are queuing - add more workers or check for task queue issues.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 71
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(asyncmatch_latency_milliseconds_bucket{service_name=\"matching\"}[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(asyncmatch_latency_milliseconds_bucket{service_name=\"matching\"}[5m])))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "No Poller Tasks",
+      "description": "Tasks added to queues with no active pollers. This usually indicates workers using wrong task queue name, or workers not running. Should be zero in healthy systems.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 79
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(no_poller_tasks_total[1m]))",
+          "legendFormat": "no_poller_tasks/sec"
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "type": "text",
+      "title": "Matching Service Interpretation",
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 85
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Reading these metrics**: Matching connects workflows to workers. High async_match_latency means workers can't keep up - scale workers or optimize activity execution time. no_poller_tasks > 0 is a configuration error - verify task queue names match between workflow starters and workers."
+      }
+    },
+    {
+      "id": 26,
+      "type": "row",
+      "title": "Workflow Outcomes",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 88
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 27,
+      "type": "timeseries",
+      "title": "Workflow Completion by Outcome",
+      "description": "How workflows are completing. success = normal completion. continued_as_new = long-running workflows continuing. failed/timeout/terminate/cancel = abnormal endings requiring investigation.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 89
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "stacking": {
+          "mode": "normal",
+          "group": "A"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(workflow_success_total{namespace=~\"$namespace\"}[1m]))",
+          "legendFormat": "success"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(workflow_continued_as_new_total{namespace=~\"$namespace\"}[1m]))",
+          "legendFormat": "continued_as_new"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(rate(workflow_failed_total{namespace=~\"$namespace\"}[1m]))",
+          "legendFormat": "failed"
+        },
+        {
+          "refId": "D",
+          "expr": "sum(rate(workflow_timeout_total{namespace=~\"$namespace\"}[1m]))",
+          "legendFormat": "timeout"
+        },
+        {
+          "refId": "E",
+          "expr": "sum(rate(workflow_terminate_total{namespace=~\"$namespace\"}[1m]))",
+          "legendFormat": "terminate"
+        },
+        {
+          "refId": "F",
+          "expr": "sum(rate(workflow_cancel_total{namespace=~\"$namespace\"}[1m]))",
+          "legendFormat": "cancel"
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "type": "timeseries",
+      "title": "Activity Outcomes",
+      "description": "Activity execution results. High task_fail with retries is normal. High fail (terminal) or timeout indicates activity implementation issues or downstream service problems.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 97
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(activity_success_total{namespace=~\"$namespace\"}[1m]))",
+          "legendFormat": "success"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(activity_task_fail_total{namespace=~\"$namespace\"}[1m]))",
+          "legendFormat": "task_fail (retryable)"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(rate(activity_fail_total{namespace=~\"$namespace\"}[1m]))",
+          "legendFormat": "fail (terminal)"
+        },
+        {
+          "refId": "D",
+          "expr": "sum(rate(activity_timeout_total{namespace=~\"$namespace\"}[1m]))",
+          "legendFormat": "timeout"
+        },
+        {
+          "refId": "E",
+          "expr": "sum(rate(activity_cancel_total{namespace=~\"$namespace\"}[1m]))",
+          "legendFormat": "cancel"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": [
+    "temporal",
+    "server"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "namespace",
+        "label": "Namespace",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values(service_requests_total, namespace)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": ".*"
+        }
+      }
+    ]
+  },
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m"
+    ],
+    "time_options": [
+      "5m",
+      "15m",
+      "30m",
+      "1h",
+      "6h"
+    ]
+  },
+  "timezone": "browser",
+  "title": "Temporal Server Health",
+  "uid": "temporal-server-health",
+  "version": 1,
+  "weekStart": ""
+}
