@@ -117,6 +117,33 @@ async def _fetch_latest_assessment(pool: asyncpg.Pool) -> dict | None:
         }
 
 
+async def _fetch_latest_signals(pool: asyncpg.Pool) -> dict | None:
+    """Fetch the most recent signal snapshot from metrics_snapshots.
+
+    The ObserveClusterWorkflow stores a snapshot every 30 seconds.
+    This provides live signal data regardless of whether a health
+    state change (and thus an assessment) has occurred.
+    """
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT timestamp, metrics
+            FROM metrics_snapshots
+            ORDER BY timestamp DESC
+            LIMIT 1
+            """
+        )
+        if not row:
+            return None
+
+        metrics = json.loads(row["metrics"]) if row["metrics"] else {}
+        return {
+            "timestamp": _instant_from_row(row["timestamp"]),
+            "primary": metrics.get("primary", {}),
+            "amplifiers": metrics.get("amplifiers", {}),
+        }
+
+
 async def _fetch_issues_for_assessment(
     pool: asyncpg.Pool,
     assessment_id: str,
@@ -416,14 +443,37 @@ _SERVICES = ["history", "matching", "frontend", "persistence"]
 
 @app.get("/status")
 async def get_status() -> StatusResponse:
-    """Current health status with signal taxonomy."""
+    """Current health status with signal taxonomy.
+
+    Signals come from the latest metrics_snapshot (updated every 30s by
+    ObserveClusterWorkflow). Health state and issues come from the latest
+    assessment (updated on state change or scheduled assessment).
+    """
     pool = await _get_pool_or_503()
     assessment = await _fetch_latest_assessment(pool)
+    live_signals = await _fetch_latest_signals(pool)
+
+    # Use live signals if available, fall back to assessment snapshot
+    if live_signals:
+        primary_signals = live_signals["primary"]
+        amplifiers = live_signals["amplifiers"]
+        signals_timestamp = live_signals["timestamp"]
+    elif assessment:
+        primary_signals = assessment["primary_signals"]
+        amplifiers = assessment["amplifiers"]
+        signals_timestamp = assessment["timestamp"]
+    else:
+        return StatusResponse(
+            health_state=HealthState.HAPPY,
+            timestamp=_now_iso(),
+        )
 
     if not assessment:
         return StatusResponse(
             health_state=HealthState.HAPPY,
-            timestamp=_now_iso(),
+            timestamp=signals_timestamp,
+            primary_signals=primary_signals,
+            amplifiers=amplifiers,
         )
 
     issues = await _fetch_issues_for_assessment(pool, assessment["id"])
@@ -432,19 +482,15 @@ async def get_status() -> StatusResponse:
         action.model_dump() for issue in issues for action in issue.suggested_actions
     ]
 
-    # If the stored assessment says non-happy but current signals show
-    # an idle cluster, override to HAPPY. This handles the case where
-    # the observe workflow restarted fresh and didn't trigger a new
-    # assessment because it initialized at HAPPY (no state change).
     health_state = HealthState(assessment["health_state"])
-    if health_state != HealthState.HAPPY and _is_cluster_idle(assessment["primary_signals"]):
+    if health_state != HealthState.HAPPY and _is_cluster_idle(primary_signals):
         health_state = HealthState.HAPPY
 
     return StatusResponse(
         health_state=health_state,
-        timestamp=assessment["timestamp"],
-        primary_signals=assessment["primary_signals"],
-        amplifiers=assessment["amplifiers"],
+        timestamp=signals_timestamp,
+        primary_signals=primary_signals,
+        amplifiers=amplifiers,
         recommended_actions=recommended_actions[:5] if health_state != HealthState.HAPPY else [],
         issue_count=len(issues) if health_state != HealthState.HAPPY else 0,
     )
@@ -454,12 +500,16 @@ async def get_status() -> StatusResponse:
 async def get_services() -> ServicesResponse:
     """Per-service health status for Grafana grid panel."""
     pool = await _get_pool_or_503()
-    assessment = await _fetch_latest_assessment(pool)
 
-    if not assessment:
-        return ServicesResponse()
-
-    primary = assessment["primary_signals"]
+    # Prefer live signals over stale assessment data
+    live_signals = await _fetch_latest_signals(pool)
+    if live_signals:
+        primary = live_signals["primary"]
+    else:
+        assessment = await _fetch_latest_assessment(pool)
+        if not assessment:
+            return ServicesResponse()
+        primary = assessment["primary_signals"]
 
     return ServicesResponse(
         services=[

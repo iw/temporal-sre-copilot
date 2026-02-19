@@ -1,5 +1,7 @@
 {
-  "annotations": { "list": [] },
+  "annotations": {
+    "list": []
+  },
   "description": "AI-powered health monitoring for Temporal on Aurora DSQL. Rules decide, AI explains.",
   "editable": true,
   "fiscalYearStartMonth": 0,
@@ -23,51 +25,99 @@
       "id": 1,
       "title": "",
       "type": "marcusolsson-dynamictext-panel",
-      "gridPos": { "h": 7, "w": 16, "x": 0, "y": 0 },
-      "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+      "gridPos": {
+        "h": 7,
+        "w": 16,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "marcusolsson-json-datasource",
+        "uid": "copilot"
+      },
       "options": {
         "content": "## {{health_state}}\n\n{{summary}}\n\n<small style=\"color: #888\">{{timestamp}}</small>",
         "defaultContent": "Waiting for Copilot assessment data…",
-        "editor": { "format": "auto", "language": "markdown" },
+        "editor": {
+          "format": "auto",
+          "language": "markdown"
+        },
         "everyRow": true,
         "wrap": true
       },
       "targets": [
         {
-          "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+          "datasource": {
+            "type": "marcusolsson-json-datasource",
+            "uid": "copilot"
+          },
           "urlPath": "/status/summary",
           "method": "GET",
           "cacheDurationSeconds": 0,
           "fields": [
-            { "jsonPath": "$.health_state", "name": "health_state" },
-            { "jsonPath": "$.summary", "name": "summary" },
-            { "jsonPath": "$.timestamp", "name": "timestamp" }
+            {
+              "jsonPath": "$.health_state",
+              "name": "health_state"
+            },
+            {
+              "jsonPath": "$.summary",
+              "name": "summary"
+            },
+            {
+              "jsonPath": "$.timestamp",
+              "name": "timestamp"
+            }
           ]
         }
       ],
       "transformations": [],
-      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
       "description": "Copilot Advisor: AI-powered health summary with status badge"
     },
     {
       "id": 2,
       "title": "Status Filter",
       "type": "stat",
-      "gridPos": { "h": 3, "w": 8, "x": 16, "y": 0 },
-      "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+      "gridPos": {
+        "h": 3,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "datasource": {
+        "type": "marcusolsson-json-datasource",
+        "uid": "copilot"
+      },
       "targets": [
         {
-          "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+          "datasource": {
+            "type": "marcusolsson-json-datasource",
+            "uid": "copilot"
+          },
           "urlPath": "/status",
           "method": "GET",
           "fields": [
-            { "jsonPath": "$.health_state", "name": "Health State" },
-            { "jsonPath": "$.issue_count", "name": "Issues" }
+            {
+              "jsonPath": "$.health_state",
+              "name": "Health State"
+            },
+            {
+              "jsonPath": "$.issue_count",
+              "name": "Issues"
+            }
           ]
         }
       ],
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "/.*/" },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
         "orientation": "horizontal",
         "textMode": "auto",
         "colorMode": "background",
@@ -77,9 +127,33 @@
       "fieldConfig": {
         "defaults": {
           "mappings": [
-            { "type": "value", "options": { "happy": { "text": "🟢 Happy", "color": "green" } } },
-            { "type": "value", "options": { "stressed": { "text": "🟡 Stressed", "color": "yellow" } } },
-            { "type": "value", "options": { "critical": { "text": "🔴 Critical", "color": "red" } } }
+            {
+              "type": "value",
+              "options": {
+                "happy": {
+                  "text": "🟢 Happy",
+                  "color": "green"
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "stressed": {
+                  "text": "🟡 Stressed",
+                  "color": "yellow"
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "critical": {
+                  "text": "🔴 Critical",
+                  "color": "red"
+                }
+              }
+            }
           ]
         },
         "overrides": []
@@ -90,20 +164,39 @@
       "id": 3,
       "title": "Issue Count",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 3 },
-      "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 3
+      },
+      "datasource": {
+        "type": "marcusolsson-json-datasource",
+        "uid": "copilot"
+      },
       "targets": [
         {
-          "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+          "datasource": {
+            "type": "marcusolsson-json-datasource",
+            "uid": "copilot"
+          },
           "urlPath": "/status",
           "method": "GET",
           "fields": [
-            { "jsonPath": "$.issue_count", "name": "Active Issues" }
+            {
+              "jsonPath": "$.issue_count",
+              "name": "Active Issues"
+            }
           ]
         }
       ],
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "/.*/" },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
         "colorMode": "value",
         "graphMode": "none"
       },
@@ -112,9 +205,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 1 },
-              { "color": "red", "value": 3 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 3
+              }
             ]
           }
         },
@@ -126,38 +228,95 @@
       "id": 4,
       "title": "📊 Analysis",
       "type": "table",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 7 },
-      "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 7
+      },
+      "datasource": {
+        "type": "marcusolsson-json-datasource",
+        "uid": "copilot"
+      },
       "targets": [
         {
-          "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+          "datasource": {
+            "type": "marcusolsson-json-datasource",
+            "uid": "copilot"
+          },
           "urlPath": "/status/issues",
           "method": "GET",
           "fields": [
-            { "jsonPath": "$.issues[*].severity", "name": "Severity" },
-            { "jsonPath": "$.issues[*].title", "name": "Issue" },
-            { "jsonPath": "$.issues[*].description", "name": "Description" },
-            { "jsonPath": "$.issues[*].likely_cause", "name": "Likely Cause" }
+            {
+              "jsonPath": "$.issues[*].severity",
+              "name": "Severity"
+            },
+            {
+              "jsonPath": "$.issues[*].title",
+              "name": "Issue"
+            },
+            {
+              "jsonPath": "$.issues[*].description",
+              "name": "Description"
+            },
+            {
+              "jsonPath": "$.issues[*].likely_cause",
+              "name": "Likely Cause"
+            }
           ]
         }
       ],
       "options": {
         "showHeader": true,
-        "sortBy": [{ "displayName": "Severity", "desc": true }],
+        "sortBy": [
+          {
+            "displayName": "Severity",
+            "desc": true
+          }
+        ],
         "cellHeight": "md"
       },
       "fieldConfig": {
-        "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" } } },
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "Severity" },
+            "matcher": {
+              "id": "byName",
+              "options": "Severity"
+            },
             "properties": [
-              { "id": "custom.width", "value": 80 },
+              {
+                "id": "custom.width",
+                "value": 80
+              },
               {
                 "id": "mappings",
                 "value": [
-                  { "type": "value", "options": { "critical": { "text": "🔴", "color": "red" } } },
-                  { "type": "value", "options": { "warning": { "text": "🟡", "color": "yellow" } } }
+                  {
+                    "type": "value",
+                    "options": {
+                      "critical": {
+                        "text": "🔴",
+                        "color": "red"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "warning": {
+                        "text": "🟡",
+                        "color": "yellow"
+                      }
+                    }
+                  }
                 ]
               }
             ]
@@ -170,45 +329,98 @@
       "id": 5,
       "title": "💡 Suggested Remediations",
       "type": "table",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 7 },
-      "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 7
+      },
+      "datasource": {
+        "type": "marcusolsson-json-datasource",
+        "uid": "copilot"
+      },
       "targets": [
         {
-          "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+          "datasource": {
+            "type": "marcusolsson-json-datasource",
+            "uid": "copilot"
+          },
           "urlPath": "/status",
           "method": "GET",
           "fields": [
-            { "jsonPath": "$.recommended_actions[*].description", "name": "Action" },
-            { "jsonPath": "$.recommended_actions[*].confidence", "name": "Confidence" },
-            { "jsonPath": "$.recommended_actions[*].target_service", "name": "Service" },
-            { "jsonPath": "$.recommended_actions[*].risk_level", "name": "Risk" }
+            {
+              "jsonPath": "$.recommended_actions[*].description",
+              "name": "Action"
+            },
+            {
+              "jsonPath": "$.recommended_actions[*].confidence",
+              "name": "Confidence"
+            },
+            {
+              "jsonPath": "$.recommended_actions[*].target_service",
+              "name": "Service"
+            },
+            {
+              "jsonPath": "$.recommended_actions[*].risk_level",
+              "name": "Risk"
+            }
           ]
         }
       ],
       "options": {
         "showHeader": true,
-        "sortBy": [{ "displayName": "Confidence", "desc": true }],
+        "sortBy": [
+          {
+            "displayName": "Confidence",
+            "desc": true
+          }
+        ],
         "cellHeight": "md"
       },
       "fieldConfig": {
-        "defaults": { "custom": { "align": "auto" } },
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "Confidence" },
+            "matcher": {
+              "id": "byName",
+              "options": "Confidence"
+            },
             "properties": [
-              { "id": "custom.width", "value": 100 },
-              { "id": "unit", "value": "percentunit" },
+              {
+                "id": "custom.width",
+                "value": 100
+              },
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
               {
                 "id": "thresholds",
                 "value": {
                   "mode": "absolute",
                   "steps": [
-                    { "color": "yellow", "value": null },
-                    { "color": "green", "value": 0.7 }
+                    {
+                      "color": "yellow",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 0.7
+                    }
                   ]
                 }
               },
-              { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "basic" } }
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic"
+                }
+              }
             ]
           }
         ]
@@ -219,33 +431,75 @@
       "id": 6,
       "title": "Signal Metrics",
       "type": "table",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
-      "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 15
+      },
+      "datasource": {
+        "type": "marcusolsson-json-datasource",
+        "uid": "copilot"
+      },
       "targets": [
         {
-          "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+          "datasource": {
+            "type": "marcusolsson-json-datasource",
+            "uid": "copilot"
+          },
           "urlPath": "/status",
           "method": "GET",
           "fields": [
-            { "jsonPath": "$.primary_signals.state_transitions.throughput_per_sec", "name": "State Trans/sec" },
-            { "jsonPath": "$.primary_signals.history.backlog_age_sec", "name": "Backlog Age (s)" },
-            { "jsonPath": "$.primary_signals.workflow_completion.completion_rate", "name": "Completion Rate" },
-            { "jsonPath": "$.primary_signals.persistence.latency_p99_ms", "name": "Persistence p99 (ms)" },
-            { "jsonPath": "$.primary_signals.frontend.latency_p99_ms", "name": "Frontend p99 (ms)" },
-            { "jsonPath": "$.primary_signals.history.shard_churn_rate_per_sec", "name": "Shard Churn/sec" }
+            {
+              "jsonPath": "$.primary_signals.state_transitions.throughput_per_sec",
+              "name": "State Trans/sec"
+            },
+            {
+              "jsonPath": "$.primary_signals.history.backlog_age_sec",
+              "name": "Backlog Age (s)"
+            },
+            {
+              "jsonPath": "$.primary_signals.workflow_completion.completion_rate",
+              "name": "Completion Rate"
+            },
+            {
+              "jsonPath": "$.primary_signals.persistence.latency_p99_ms",
+              "name": "Persistence p99 (ms)"
+            },
+            {
+              "jsonPath": "$.primary_signals.frontend.latency_p99_ms",
+              "name": "Frontend p99 (ms)"
+            },
+            {
+              "jsonPath": "$.primary_signals.history.shard_churn_rate_per_sec",
+              "name": "Shard Churn/sec"
+            }
           ]
         }
       ],
-      "options": { "showHeader": true, "cellHeight": "sm" },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
       "fieldConfig": {
         "defaults": {
-          "custom": { "align": "auto" },
+          "custom": {
+            "align": "auto"
+          },
           "decimals": 1
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "Completion Rate" },
-            "properties": [{ "id": "unit", "value": "percentunit" }]
+            "matcher": {
+              "id": "byName",
+              "options": "Completion Rate"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              }
+            ]
           }
         ]
       },
@@ -255,26 +509,63 @@
       "id": 7,
       "title": "Amplifier Metrics",
       "type": "table",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
-      "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 15
+      },
+      "datasource": {
+        "type": "marcusolsson-json-datasource",
+        "uid": "copilot"
+      },
       "targets": [
         {
-          "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+          "datasource": {
+            "type": "marcusolsson-json-datasource",
+            "uid": "copilot"
+          },
           "urlPath": "/status",
           "method": "GET",
           "fields": [
-            { "jsonPath": "$.amplifiers.persistence.occ_conflicts_per_sec", "name": "OCC Conflicts/sec" },
-            { "jsonPath": "$.amplifiers.connection_pool.utilization_pct", "name": "Pool Util %" },
-            { "jsonPath": "$.amplifiers.connection_pool.churn_rate_per_sec", "name": "Conn Churn/sec" },
-            { "jsonPath": "$.amplifiers.queue.task_backlog_depth", "name": "Backlog Depth" },
-            { "jsonPath": "$.amplifiers.runtime.goroutines", "name": "Goroutines" },
-            { "jsonPath": "$.amplifiers.host.gc_pause_ms", "name": "GC Pause (ms)" }
+            {
+              "jsonPath": "$.amplifiers.persistence.occ_conflicts_per_sec",
+              "name": "OCC Conflicts/sec"
+            },
+            {
+              "jsonPath": "$.amplifiers.connection_pool.utilization_pct",
+              "name": "Pool Util %"
+            },
+            {
+              "jsonPath": "$.amplifiers.connection_pool.churn_rate_per_sec",
+              "name": "Conn Churn/sec"
+            },
+            {
+              "jsonPath": "$.amplifiers.queue.task_backlog_depth",
+              "name": "Backlog Depth"
+            },
+            {
+              "jsonPath": "$.amplifiers.runtime.goroutines",
+              "name": "Goroutines"
+            },
+            {
+              "jsonPath": "$.amplifiers.host.gc_pause_ms",
+              "name": "GC Pause (ms)"
+            }
           ]
         }
       ],
-      "options": { "showHeader": true, "cellHeight": "sm" },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
       "fieldConfig": {
-        "defaults": { "custom": { "align": "auto" }, "decimals": 1 },
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          },
+          "decimals": 1
+        },
         "overrides": []
       },
       "description": "Amplifier signals (explain why state changed)"
@@ -283,35 +574,92 @@
       "id": 8,
       "title": "Per-Service Health",
       "type": "table",
-      "gridPos": { "h": 5, "w": 24, "x": 0, "y": 23 },
-      "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "datasource": {
+        "type": "marcusolsson-json-datasource",
+        "uid": "copilot"
+      },
       "targets": [
         {
-          "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+          "datasource": {
+            "type": "marcusolsson-json-datasource",
+            "uid": "copilot"
+          },
           "urlPath": "/status/services",
           "method": "GET",
           "fields": [
-            { "jsonPath": "$.services[*].name", "name": "Service" },
-            { "jsonPath": "$.services[*].status", "name": "Status" }
+            {
+              "jsonPath": "$.services[*].name",
+              "name": "Service"
+            },
+            {
+              "jsonPath": "$.services[*].status",
+              "name": "Status"
+            }
           ]
         }
       ],
-      "options": { "showHeader": true, "cellHeight": "sm" },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
       "fieldConfig": {
-        "defaults": { "custom": { "align": "center" } },
+        "defaults": {
+          "custom": {
+            "align": "center"
+          }
+        },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "Status" },
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
             "properties": [
               {
                 "id": "mappings",
                 "value": [
-                  { "type": "value", "options": { "happy": { "text": "🟢 Happy", "color": "green" } } },
-                  { "type": "value", "options": { "stressed": { "text": "🟡 Stressed", "color": "yellow" } } },
-                  { "type": "value", "options": { "critical": { "text": "🔴 Critical", "color": "red" } } }
+                  {
+                    "type": "value",
+                    "options": {
+                      "happy": {
+                        "text": "🟢 Happy",
+                        "color": "green"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "stressed": {
+                        "text": "🟡 Stressed",
+                        "color": "yellow"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "critical": {
+                        "text": "🔴 Critical",
+                        "color": "red"
+                      }
+                    }
+                  }
                 ]
               },
-              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "basic" } }
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              }
             ]
           }
         ]
@@ -322,19 +670,43 @@
       "id": 9,
       "title": "Log Pattern Alerts",
       "type": "table",
-      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 28 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "topk(10, sum by (pattern, service) (copilot_log_pattern_count))",
           "legendFormat": "{{pattern}} ({{service}})",
           "refId": "A"
         }
       ],
-      "options": { "showHeader": true, "sortBy": [{ "displayName": "Value", "desc": true }], "cellHeight": "sm" },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "Value",
+            "desc": true
+          }
+        ],
+        "cellHeight": "sm"
+      },
       "fieldConfig": {
-        "defaults": { "custom": { "align": "auto" } },
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
         "overrides": []
       },
       "description": "Narrative signals: log patterns that explain state transitions"
@@ -343,16 +715,34 @@
       "id": 10,
       "title": "Health Timeline",
       "type": "state-timeline",
-      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 34 },
-      "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "datasource": {
+        "type": "marcusolsson-json-datasource",
+        "uid": "copilot"
+      },
       "targets": [
         {
-          "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+          "datasource": {
+            "type": "marcusolsson-json-datasource",
+            "uid": "copilot"
+          },
           "urlPath": "/status/timeline",
           "method": "GET",
           "fields": [
-            { "jsonPath": "$.timeline[*].timestamp", "name": "Time", "type": "time" },
-            { "jsonPath": "$.timeline[*].health_state", "name": "Health State" }
+            {
+              "jsonPath": "$.timeline[*].timestamp",
+              "name": "Time",
+              "type": "time"
+            },
+            {
+              "jsonPath": "$.timeline[*].health_state",
+              "name": "Health State"
+            }
           ]
         }
       ],
@@ -364,11 +754,37 @@
       },
       "fieldConfig": {
         "defaults": {
-          "custom": { "fillOpacity": 80 },
+          "custom": {
+            "fillOpacity": 80
+          },
           "mappings": [
-            { "type": "value", "options": { "happy": { "text": "Happy", "color": "green" } } },
-            { "type": "value", "options": { "stressed": { "text": "Stressed", "color": "yellow" } } },
-            { "type": "value", "options": { "critical": { "text": "Critical", "color": "red" } } }
+            {
+              "type": "value",
+              "options": {
+                "happy": {
+                  "text": "Happy",
+                  "color": "green"
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "stressed": {
+                  "text": "Stressed",
+                  "color": "yellow"
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "critical": {
+                  "text": "Critical",
+                  "color": "red"
+                }
+              }
+            }
           ]
         },
         "overrides": []
@@ -379,111 +795,139 @@
       "id": 11,
       "title": "📸 Behaviour Profiles",
       "type": "row",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 40 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
       "collapsed": false,
       "panels": []
     },
     {
       "id": 12,
-      "title": "Behaviour Profiles",
-      "type": "canvas",
-      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 41 },
-      "options": {
-        "inlineEditing": false,
-        "panZoom": false,
-        "root": {
-          "background": { "color": { "fixed": "transparent" } },
-          "border": { "width": 0 },
-          "constraint": { "horizontal": "left", "vertical": "top" },
-          "elements": [
-            {
-              "background": { "color": { "fixed": "transparent" } },
-              "border": { "width": 0 },
-              "config": {
-                "text": { "fixed": "📸 Create Profile", "mode": "fixed" },
-                "style": { "variant": "primary" },
-                "api": {
-                  "endpoint": "${copilot_api}/profiles/",
-                  "method": "POST",
-                  "contentType": "application/json",
-                  "data": "{\"name\": \"profile-${__from:date:iso}\", \"cluster_id\": \"${cluster_id}\", \"time_window_start\": \"${__from:date:iso}\", \"time_window_end\": \"${__to:date:iso}\", \"namespace\": \"${namespace}\", \"task_queue\": \"${task_queue}\", \"label\": \"${profile_label}\"}"
-                }
-              },
-              "constraint": { "horizontal": "left", "vertical": "top" },
-              "name": "Create Profile Button",
-              "placement": { "height": 36, "left": 0, "top": 8, "width": 180 },
-              "type": "button"
-            },
-            {
-              "background": { "color": { "fixed": "transparent" } },
-              "border": { "width": 0 },
-              "config": {
-                "align": "left",
-                "color": { "fixed": "#cccccc" },
-                "size": 14,
-                "text": { "fixed": "Snapshots the current time range. Set Cluster ID, Namespace, Task Queue, and Profile Label using the dashboard variables above.", "mode": "fixed" },
-                "valign": "middle"
-              },
-              "constraint": { "horizontal": "left", "vertical": "top" },
-              "name": "Instructions",
-              "placement": { "height": 36, "left": 200, "top": 8, "width": 800 },
-              "type": "text"
-            }
-          ],
-          "name": "Element 0",
-          "placement": { "height": 100, "left": 0, "top": 0, "width": 100 },
-          "type": "frame"
-        }
+      "title": "Create Profile",
+      "type": "marcusolsson-dynamictext-panel",
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 41
       },
-      "fieldConfig": { "defaults": {}, "overrides": [] },
-      "description": "Click the button to create a Behaviour Profile from the current dashboard time range. Configure cluster_id, namespace, task_queue, and profile_label using the dashboard variables."
+      "options": {
+        "content": "",
+        "defaultContent": "<div style=\"display:flex;align-items:center;gap:16px;padding:4px 0\">\n  <button id=\"createProfileBtn\" style=\"background:#3274d9;color:#fff;border:none;border-radius:4px;padding:8px 20px;font-size:14px;cursor:pointer;white-space:nowrap\">📸 Create Profile</button>\n  <span id=\"profileStatus\" style=\"font-size:13px;color:#aaa\">Snapshots the current time range. Set Cluster ID, Namespace, Task Queue, and Profile Label above.</span>\n</div>",
+        "editor": {
+          "format": "html",
+          "language": "html"
+        },
+        "everyRow": false,
+        "wrap": true,
+        "afterRender": "const btn = document.getElementById('createProfileBtn');\nconst status = document.getElementById('profileStatus');\nif (!btn || btn.dataset.bound) return;\nbtn.dataset.bound = 'true';\n\nbtn.addEventListener('click', async () => {\n  const body = {\n    name: 'profile-' + new Date().toISOString().slice(0,19),\n    cluster_id: context.grafana.replaceVariables('${cluster_id}'),\n    time_window_start: context.grafana.replaceVariables('${__from:date:iso}'),\n    time_window_end: context.grafana.replaceVariables('${__to:date:iso}'),\n    namespace: context.grafana.replaceVariables('${namespace}') || null,\n    task_queue: context.grafana.replaceVariables('${task_queue}') || null,\n    label: context.grafana.replaceVariables('${profile_label}') || null\n  };\n\n  btn.disabled = true;\n  btn.textContent = '\\u23f3 Creating\\u2026';\n  status.textContent = 'Collecting telemetry from Prometheus\\u2026';\n  status.style.color = '#aaa';\n\n  try {\n    const resp = await fetch('/api/datasources/proxy/uid/copilot/profiles/', {\n      method: 'POST',\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify(body)\n    });\n    if (!resp.ok) {\n      const err = await resp.text();\n      throw new Error(resp.status + ': ' + err.slice(0, 200));\n    }\n    const result = await resp.json();\n    status.textContent = '\\u2705 Profile created: ' + result.name + ' (id: ' + result.id.slice(0,8) + '\\u2026)';\n    status.style.color = '#73bf69';\n    context.grafana.notifySuccess(['Profile Created', result.name]);\n    setTimeout(() => context.grafana.refresh(), 1000);\n  } catch (e) {\n    status.textContent = '\\u274c ' + e.message;\n    status.style.color = '#f2495c';\n    context.grafana.notifyError(['Profile Creation Failed', e.message]);\n  } finally {\n    btn.disabled = false;\n    btn.textContent = '\\ud83d\\udcf8 Create Profile';\n  }\n});"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "description": "Click to create a Behaviour Profile from the current dashboard time range. Shows success/failure feedback and refreshes the profile list."
     },
     {
       "id": 13,
       "title": "📋 Recent Profiles",
       "type": "marcusolsson-dynamictext-panel",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 47 },
-      "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 47
+      },
+      "datasource": {
+        "type": "marcusolsson-json-datasource",
+        "uid": "copilot"
+      },
       "targets": [
         {
-          "datasource": { "type": "marcusolsson-json-datasource", "uid": "copilot" },
+          "datasource": {
+            "type": "marcusolsson-json-datasource",
+            "uid": "copilot"
+          },
           "urlPath": "/profiles/?cluster=${cluster_id}&namespace=${namespace}",
           "method": "GET",
           "cacheDurationSeconds": 30,
           "fields": [
-            { "jsonPath": "$[*].id", "name": "ID" },
-            { "jsonPath": "$[*].name", "name": "Name" },
-            { "jsonPath": "$[*].label", "name": "Label" },
-            { "jsonPath": "$[*].cluster_id", "name": "Cluster" },
-            { "jsonPath": "$[*].namespace", "name": "Namespace" },
-            { "jsonPath": "$[*].time_window_start", "name": "Start" },
-            { "jsonPath": "$[*].time_window_end", "name": "End" },
-            { "jsonPath": "$[*].is_baseline", "name": "Baseline" },
-            { "jsonPath": "$[*].created_at", "name": "Created" }
+            {
+              "jsonPath": "$[*].id",
+              "name": "ID"
+            },
+            {
+              "jsonPath": "$[*].name",
+              "name": "Name"
+            },
+            {
+              "jsonPath": "$[*].label",
+              "name": "Label"
+            },
+            {
+              "jsonPath": "$[*].cluster_id",
+              "name": "Cluster"
+            },
+            {
+              "jsonPath": "$[*].namespace",
+              "name": "Namespace"
+            },
+            {
+              "jsonPath": "$[*].time_window_start",
+              "name": "Start"
+            },
+            {
+              "jsonPath": "$[*].time_window_end",
+              "name": "End"
+            },
+            {
+              "jsonPath": "$[*].is_baseline",
+              "name": "Baseline"
+            },
+            {
+              "jsonPath": "$[*].created_at",
+              "name": "Created"
+            }
           ]
         }
       ],
       "options": {
         "content": "| ID | Name | Label | Cluster | Baseline | Created |\n|---|---|---|---|---|---|\n{{#each data}}\n| `{{ID}}` | {{Name}} | {{Label}} | {{Cluster}} | {{#if Baseline}}⭐{{/if}} | {{Created}} |\n{{/each}}",
         "defaultContent": "No profiles found. Create one using the curl command above, then refresh this panel.",
-        "editor": { "format": "auto", "language": "markdown" },
+        "editor": {
+          "format": "auto",
+          "language": "markdown"
+        },
         "everyRow": false,
         "wrap": true
       },
-      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
       "description": "List of behaviour profiles for the selected cluster and namespace"
     }
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["copilot", "temporal", "sre", "ai"],
+  "tags": [
+    "copilot",
+    "temporal",
+    "sre",
+    "ai"
+  ],
   "templating": {
     "list": [
       {
         "name": "copilot_api",
         "label": "Copilot API",
         "type": "textbox",
-        "current": { "value": "http://localhost:8081" },
+        "current": {
+          "value": "http://localhost:8081"
+        },
         "options": [],
         "query": "http://localhost:8081",
         "description": "Copilot API base URL (browser-reachable)"
@@ -492,7 +936,9 @@
         "name": "cluster_id",
         "label": "Cluster ID",
         "type": "textbox",
-        "current": { "value": "default" },
+        "current": {
+          "value": "default"
+        },
         "options": [],
         "query": "default",
         "description": "DSQL cluster identifier for behaviour profiles"
@@ -501,7 +947,9 @@
         "name": "namespace",
         "label": "Namespace",
         "type": "textbox",
-        "current": { "value": "default" },
+        "current": {
+          "value": "default"
+        },
         "options": [],
         "query": "default",
         "description": "Temporal namespace for behaviour profiles"
@@ -510,7 +958,9 @@
         "name": "task_queue",
         "label": "Task Queue",
         "type": "textbox",
-        "current": { "value": "" },
+        "current": {
+          "value": ""
+        },
         "options": [],
         "query": "",
         "description": "Temporal task queue for behaviour profiles (optional)"
@@ -519,14 +969,19 @@
         "name": "profile_label",
         "label": "Profile Label",
         "type": "textbox",
-        "current": { "value": "" },
+        "current": {
+          "value": ""
+        },
         "options": [],
         "query": "",
         "description": "Optional label for the behaviour profile (e.g. 'healthy-baseline', 'post-deploy')"
       }
     ]
   },
-  "time": { "from": "now-6h", "to": "now" },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "utc",
   "title": "Temporal SRE Copilot",

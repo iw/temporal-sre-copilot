@@ -34,16 +34,15 @@ logger = logging.getLogger("behaviour_profiles.telemetry")
 # ---------------------------------------------------------------------------
 
 _QUERIES: dict[str, str] = {
-    # -- Throughput (server dashboard: "State Transitions", "Workflow Outcomes") --
+    # -- Throughput --
+    # workflow_timeout_total and workflow_terminate_total don't exist in Mimir;
+    # use workflow_failed_total which captures all non-success terminal states.
     "workflows_started_per_sec": (
-        "sum(rate(workflow_success_total[1m]) + rate(workflow_failed_total[1m])"
-        " + rate(workflow_timeout_total[1m]) + rate(workflow_terminate_total[1m]))"
+        "sum(rate(workflow_success_total[1m]) + rate(workflow_failed_total[1m]))"
     ),
     "workflows_completed_per_sec": "sum(rate(workflow_success_total[1m]))",
     "state_transitions_per_sec": "sum(rate(state_transition_count_ratio_sum[1m]))",
-    # -- Latency (server dashboard: "Service Latency", "Persistence Latency") --
-    # Schedule-to-start is not directly exposed as a histogram by the server.
-    # Use service_latency_milliseconds for workflow/activity service-level latency.
+    # -- Latency (timers → _milliseconds suffix) --
     "workflow_schedule_to_start_p95": (
         "histogram_quantile(0.95, sum by (le)"
         " (rate(service_latency_milliseconds_bucket{service_name='matching'}[5m])))"
@@ -61,51 +60,58 @@ _QUERIES: dict[str, str] = {
         " (rate(asyncmatch_latency_milliseconds_bucket{service_name='matching'}[5m])))"
     ),
     "persistence_latency_p95": (
-        "histogram_quantile(0.95, sum by (le)"
-        " (rate(persistence_latency_milliseconds_bucket[5m])))"
+        "histogram_quantile(0.95, sum by (le) (rate(persistence_latency_milliseconds_bucket[5m])))"
     ),
     "persistence_latency_p99": (
-        "histogram_quantile(0.99, sum by (le)"
-        " (rate(persistence_latency_milliseconds_bucket[5m])))"
+        "histogram_quantile(0.99, sum by (le) (rate(persistence_latency_milliseconds_bucket[5m])))"
     ),
-    # -- Matching (server dashboard: "Task Queue Polling", "Async Match Latency") --
+    # -- Matching --
     "sync_match_rate": "sum(rate(poll_success_total[1m]))",
     "async_match_rate": "sum(rate(poll_timeouts_total[1m]))",
     "task_dispatch_latency": (
         "histogram_quantile(0.95, sum by (le)"
         " (rate(asyncmatch_latency_milliseconds_bucket{service_name='matching'}[5m])))"
     ),
-    "backlog_count": "sum(rate(no_poller_tasks_total[1m]))",
+    # no_poller_tasks_total doesn't exist; use approximate_backlog_count gauge
+    "backlog_count": "sum(approximate_backlog_count) or vector(0)",
     "backlog_age": (
         "histogram_quantile(0.95, sum by (le)"
         " (rate(task_latency_queue_milliseconds_bucket{service_name='history'}[5m])))"
     ),
-    # -- DSQL pool (persistence dashboard: "Connections" row) --
+    # -- DSQL pool --
     "pool_open_count": "sum(dsql_reservoir_size) or sum(dsql_pool_idle) or vector(0)",
     "pool_in_use_count": "sum(dsql_pool_in_use) or vector(0)",
     "pool_idle_count": "sum(dsql_pool_idle) or vector(0)",
     "reservoir_size": "sum(dsql_reservoir_size) or vector(0)",
-    "reservoir_empty_events": "sum(rate(dsql_reservoir_empty_total[1m]))",
+    # dsql_reservoir_empty_total doesn't exist; use dsql_pool_wait_total as proxy
+    "reservoir_empty_events": "sum(rate(dsql_pool_wait_total[1m])) or vector(0)",
     "open_failures": "sum(rate(persistence_errors_total[1m]))",
     "reconnect_count": "sum(rate(dsql_reservoir_refills_total[1m]))",
-    # -- Errors (persistence dashboard: "OCC Conflicts" row) --
-    "occ_conflicts_per_sec": "sum(rate(dsql_tx_conflict_total[1m]))",
-    "exhausted_retries_per_sec": "sum(rate(dsql_tx_exhausted_total[1m]))",
-    "dsql_auth_failures": "sum(rate(dsql_tx_retry_total[1m]))",
-    # -- Resources: worker task slot utilization not available from server scrape --
+    # -- Errors --
+    # dsql_tx_conflict/exhausted/retry_total don't exist in Mimir;
+    # use persistence_error_with_type_total as proxy.
+    "occ_conflicts_per_sec": (
+        'sum(rate(persistence_error_with_type_total{error_type="ShardOwnershipLostError"}[1m]))'
+        " or vector(0)"
+    ),
+    "exhausted_retries_per_sec": (
+        'sum(rate(persistence_error_with_type_total{error_type="ConditionFailedError"}[1m]))'
+        " or vector(0)"
+    ),
+    "dsql_auth_failures": (
+        "sum(rate(persistence_session_refresh_attempts_total[1m])) or vector(0)"
+    ),
+    # -- Resources --
     "worker_task_slot_utilization": "vector(0)",
 }
 
-# Per-service resource queries — not available in dev (no cAdvisor).
-# Alloy only scrapes Temporal server metrics on :9090.
-# These return vector(0) gracefully when metrics are absent.
-_SERVICE_CPU_QUERY = (
-    'sum(rate(process_cpu_seconds_total{{service_name=~"{service}.*"}}[1m])) * 100'
-    " or vector(0)"
-)
-_SERVICE_MEM_QUERY = (
-    'sum(process_resident_memory_bytes{{service_name=~"{service}.*"}}) or vector(0)'
-)
+# Per-service resource queries.
+# Temporal server doesn't export process_cpu_seconds_total or process_resident_memory_bytes.
+# It exports memory_heap, memory_allocated, num_goroutines as gauges.
+# These are not per-service_name — they're per scrape job.
+# Use vector(0) gracefully when metrics are absent.
+_SERVICE_CPU_QUERY = "vector(0)"
+_SERVICE_MEM_QUERY = 'sum(memory_heap{{job="temporal-{service}"}}) or vector(0)'
 _SERVICES = ("history", "matching", "frontend", "worker")
 
 

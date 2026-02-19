@@ -74,9 +74,7 @@ async def _fetch_cluster_versions() -> tuple[str | None, str | None]:
     from temporalio.client import Client
 
     client = await Client.connect(_monitored_temporal_address)
-    info = await client.workflow_service.get_cluster_info(
-        GetClusterInfoRequest()
-    )
+    info = await client.workflow_service.get_cluster_info(GetClusterInfoRequest())
     server_version = info.server_version or None
     # persistence_store reports the plugin name; the DSQL plugin version
     # is the same as the server version in the temporal-dsql fork
