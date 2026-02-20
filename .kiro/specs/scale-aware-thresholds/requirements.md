@@ -9,13 +9,16 @@ This feature introduces a three-layer calibration system that progressively refi
 - **Layer 1 — Scale-Aware Thresholds**: The Health State Machine adapts thresholds based on observed throughput, aligned with Config Compiler presets (starter, mid-scale, high-throughput). This is the immediate fix for the "2 wf/s dev cluster stuck in Stressed" problem.
 - **Layer 2 — Deployment Profiles**: The Config Compiler gains a DeploymentProfile that captures scaling topology (min/max replicas, autoscaler type, resource limits) and provisioned resource identities (DSQL endpoint, ECS cluster ARN, AMP workspace ID). This bridges "what we compiled" to "what we deployed."
 - **Layer 3 — Dynamic Inspection**: The Copilot dynamically inspects the monitored cluster's deployment (replica counts, resource utilization, autoscaler state, DSQL connection limits) and feeds a DeploymentContext into health evaluation, allowing thresholds to be refined beyond what throughput alone can determine.
+- **Layer 4 — Deployment Profile Loading**: The Copilot loads a DeploymentProfile from a local file or S3 URI at startup, replacing manual env var configuration. The Config Compiler emits the profile as part of its output. Inspectors can parse platform configs (e.g. docker-compose.yml) directly for intended topology.
 
 Together these form a feedback loop:
 
 ```
 Config Compiler (what we intended)
-        ↓
+        ↓ --emit-deployment-profile
 Deployment Profile (what we deployed + scaling bounds)
+        ↓ DEPLOYMENT_PROFILE=file|s3://
+Copilot loads profile at startup
         ↓
 Copilot Dynamic Inspection (what's actually running)
         ↓
@@ -45,6 +48,7 @@ All thresholds remain fully deterministic — no LLM involvement in state transi
 - **Platform_Inspector**: A protocol-based adapter that queries a specific deployment platform (ECS, EKS) for current deployment state. Discovered via entry points, same pattern as Config Compiler adapters.
 - **Scaling_Topology**: The min/max replica counts per Temporal service, autoscaler type (Karpenter, HPA, fixed), and resource limits (CPU, memory) per service.
 - **Resource_Identity**: A provisioned infrastructure identifier: DSQL cluster endpoint, ECS cluster ARN or EKS namespace, AMP workspace ID.
+- **Deployment_Profile_Location**: A local file path or S3 URI (`s3://bucket/key`) pointing to a serialized `DeploymentProfile` JSON document. The single configuration input the Copilot needs to enable deployment-aware health evaluation.
 
 
 ## Requirements
@@ -343,3 +347,53 @@ All thresholds remain fully deterministic — no LLM involvement in state transi
 7. FOR ALL valid Deployment_Context instances, serializing to JSON then deserializing SHALL produce an equivalent Deployment_Context (round-trip property).
 8. THE property test suite SHALL verify that threshold refinement with Deployment_Context preserves all Health State Machine invariants (transition invariant, threshold ordering, determinism).
 9. THE property test suite SHALL verify that when Deployment_Context is None, health evaluation produces identical results to throughput-only evaluation (backward compatibility property).
+
+
+### Layer 4: Deployment Profile Loading
+
+### Requirement 25: Deployment Profile Location
+
+**User Story:** As an operator, I want to point the Copilot at a deployment profile via a single env var or config field, so that the Copilot automatically derives the ResourceIdentity, ThresholdOverrides, and scaling expectations from the profile — without manually constructing JSON env vars.
+
+#### Acceptance Criteria
+
+1. THE Copilot worker SHALL accept a `DEPLOYMENT_PROFILE` environment variable whose value is either a local file path or an S3 URI (`s3://bucket/key`).
+2. WHEN `DEPLOYMENT_PROFILE` is a local file path, THE Copilot worker SHALL read and parse the file as a `DeploymentProfile` JSON document.
+3. WHEN `DEPLOYMENT_PROFILE` is an S3 URI, THE Copilot worker SHALL fetch the object using boto3 and parse it as a `DeploymentProfile` JSON document.
+4. WHEN `DEPLOYMENT_PROFILE` is not set, THE Copilot worker SHALL fall back to throughput-only scale band classification with no deployment context (backward compatible).
+5. THE Copilot worker SHALL extract `ResourceIdentity` from the loaded `DeploymentProfile` and pass it to `ObserveClusterInput`, replacing the `resource_identity_json` field.
+6. THE Copilot worker SHALL log the loaded profile's preset name, platform type, and DSQL endpoint at startup for observability.
+
+### Requirement 26: Compose Config Resolution
+
+**User Story:** As a developer running the dev Compose stack, I want the deployment profile to be generated from the fully resolved docker-compose config (with env vars interpolated), so that the profile contains actual DSQL endpoints and resource limits rather than placeholder variables.
+
+#### Acceptance Criteria
+
+1. THE Compose Deployment_Adapter SHALL accept the output of `docker compose config` (fully resolved YAML with all env var interpolation, extends, and merges applied) as its input for generating a DeploymentProfile.
+2. THE Compose Deployment_Adapter SHALL parse the resolved YAML to extract: service definitions, replica counts (from `deploy.replicas`, defaulting to 1), resource limits (from `deploy.resources.limits`), and DSQL endpoint (from resolved service environment variables).
+3. THE Config Compiler SHALL support a `--compose-config` flag that runs `docker compose config` (or accepts piped input) and passes the resolved YAML to the Compose Deployment_Adapter.
+4. THE Compose Platform_Inspector SHALL NOT parse compose files — its responsibility is querying Docker API for runtime state only. All intended topology comes from the deployment profile.
+5. THE resolved config approach SHALL handle both `docker-compose.yml` and `compose.yaml` naming conventions (via `docker compose config` which handles this natively).
+
+### Requirement 27: Config Compiler Profile Emit
+
+**User Story:** As an operator, I want the Config Compiler to emit a deployment profile JSON file as part of its output, so that the Copilot can consume it without manual profile construction.
+
+#### Acceptance Criteria
+
+1. THE Config Compiler `compile` command SHALL accept an optional `--emit-deployment-profile` flag that writes a `DeploymentProfile` JSON file alongside the compiled configuration artifacts.
+2. WHEN `--emit-deployment-profile` is specified with a Deployment_Adapter, THE Config Compiler SHALL invoke the adapter's `render_deployment()` method and write the result to the specified output path.
+3. THE emitted deployment profile SHALL be a valid JSON document parseable by `DeploymentProfile.model_validate_json()`.
+4. THE Config Compiler SHALL support emitting to a local file path or stdout (for piping to S3 upload).
+
+### Requirement 28: ObserveClusterInput Simplification
+
+**User Story:** As a developer, I want the ObserveClusterWorkflow input to accept a DeploymentProfile directly (loaded by the worker), replacing the raw JSON string fields, so that the workflow has typed access to the full profile.
+
+#### Acceptance Criteria
+
+1. THE `ObserveClusterInput` SHALL replace `resource_identity_json: str | None` and `threshold_overrides_json: str | None` with `deployment_profile: DeploymentProfile | None = None`.
+2. THE `ObserveClusterWorkflow` SHALL extract `ResourceIdentity` from the deployment profile for inspector calls.
+3. THE `ObserveClusterWorkflow` SHALL derive the initial scale band from the deployment profile's `preset_name` when available, falling back to throughput-based classification.
+4. WHEN `deployment_profile` is None, THE workflow SHALL behave identically to the current throughput-only evaluation (backward compatible).

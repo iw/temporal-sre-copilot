@@ -285,27 +285,36 @@ def _is_idle(primary: PrimarySignals) -> bool:
     """Detect an idle cluster — no work submitted, not broken.
 
     An idle cluster has:
-    - Zero or near-zero throughput (no work to do)
+    - Low or near-zero throughput (no meaningful user work)
     - Zero errors (nothing is failing)
-    - Zero backlog (nothing is waiting)
+    - Low backlog (nothing meaningful is waiting)
     - Zero workflow failures
 
     This distinguishes "quiet" from "broken." A broken cluster
-    typically has errors, backlog buildup, or non-zero failure rates.
+    typically has errors, sustained backlog buildup, or non-zero failure rates.
+
+    The thresholds are set above system workflow noise. At startup,
+    Temporal generates 2-5 st/s of background activity from shard
+    acquisition, system workflows (archival, replication), and
+    membership protocol. Brief backlog spikes (< 5s) are normal
+    during shard handoff.
     """
+    # System workflows + shard claims can generate 2-5 st/s of background noise.
+    # 5.0 st/s is well below any meaningful user workload.
     has_no_throughput = (
-        primary.state_transitions.throughput_per_sec < 1.0
-        and primary.history.task_processing_rate_per_sec < 1.0
+        primary.state_transitions.throughput_per_sec < 5.0
+        and primary.history.task_processing_rate_per_sec < 5.0
     )
     has_no_errors = (
         primary.frontend.error_rate_per_sec < 0.1
         and primary.persistence.error_rate_per_sec < 0.1
         and primary.workflow_completion.failed_per_sec < 0.1
     )
+    # Shard acquisition creates brief backlog spikes; 5s accommodates this.
     has_no_backlog = (
-        primary.history.backlog_age_sec < 1.0
-        and primary.matching.workflow_backlog_age_sec < 1.0
-        and primary.matching.activity_backlog_age_sec < 1.0
+        primary.history.backlog_age_sec < 5.0
+        and primary.matching.workflow_backlog_age_sec < 5.0
+        and primary.matching.activity_backlog_age_sec < 5.0
     )
 
     return has_no_throughput and has_no_errors and has_no_backlog
@@ -396,10 +405,15 @@ def _is_stressed(
     STRESSED if progress continues but trending wrong:
     - Signal 2: State transition latency rising
     - Signal 4: History backlog age rising (but not critical)
-    - Signal 8: Frontend latency rising
+    - Signal 8: Frontend latency rising (demand-gated)
     - Signal 11: Persistence latency rising
     - Signal 6: Shard churn rate high
-    - Signal 10: Poller timeout rate high
+    - Signal 10: Poller timeout rate high (demand-gated)
+
+    Signals 8 and 10 are demand-gated: on idle/low-throughput clusters,
+    long-poll operations dominate frontend latency (workers wait ~90s for
+    tasks), and high poller timeout rates are normal (no work available).
+    These are metric artifacts, not stress indicators.
     """
     # Signal 2: State transition latency rising
     if primary.state_transitions.latency_p99_ms > thresholds.state_transition_latency_p99_max_ms:
@@ -409,8 +423,15 @@ def _is_stressed(
     if primary.history.backlog_age_sec > thresholds.history_backlog_age_stress_sec:
         return True
 
-    # Signal 8: Frontend latency rising
-    if primary.frontend.latency_p99_ms > thresholds.frontend_latency_p99_max_ms:
+    # Signal 8: Frontend latency rising — demand-gated.
+    # On low-throughput clusters, long-poll operations (workers waiting
+    # ~60-90s for tasks) inflate frontend latency p99 to ~90-100s.
+    # This is expected behavior, not degradation. Only evaluate when
+    # there's enough throughput for the metric to reflect real API latency.
+    if (
+        primary.state_transitions.throughput_per_sec >= 5.0
+        and primary.frontend.latency_p99_ms > thresholds.frontend_latency_p99_max_ms
+    ):
         return True
 
     # Signal 11: Persistence latency rising
@@ -421,8 +442,14 @@ def _is_stressed(
     if primary.history.shard_churn_rate_per_sec > thresholds.shard_churn_rate_max_per_sec:
         return True
 
-    # Signal 10: Poller timeout rate high
-    return primary.poller.poll_timeout_rate > thresholds.poller_timeout_rate_max
+    # Signal 10: Poller timeout rate high — demand-gated.
+    # On idle clusters, workers poll and time out because there's no work.
+    # A 40-60% timeout rate is normal when the cluster is quiet.
+    # Only evaluate when throughput indicates real demand.
+    if primary.state_transitions.throughput_per_sec >= 5.0:
+        return primary.poller.poll_timeout_rate > thresholds.poller_timeout_rate_max
+
+    return False
 
 
 def _is_healthy(
@@ -434,14 +461,32 @@ def _is_healthy(
     HAPPY requires ALL of:
     - Signal 1: State transition throughput above healthy threshold
     - Signal 4: History backlog age below healthy threshold
-    - Signal 3: Workflow completion rate above healthy threshold
+    - Signal 3: Workflow completion rate above healthy threshold (demand-gated)
+
+    The completion rate check is demand-gated: at low throughput, the
+    ratio is unreliable (a single slow workflow skews it). This mirrors
+    the demand-gating in _is_critical() for the same reason.
     """
-    return (
-        primary.state_transitions.throughput_per_sec >= thresholds.state_transitions_healthy_per_sec
-        and primary.history.backlog_age_sec <= thresholds.history_backlog_age_healthy_sec
-        and primary.workflow_completion.completion_rate
-        >= thresholds.workflow_completion_rate_healthy
+    if primary.state_transitions.throughput_per_sec < thresholds.state_transitions_healthy_per_sec:
+        return False
+    if primary.history.backlog_age_sec > thresholds.history_backlog_age_healthy_sec:
+        return False
+
+    # Demand-gate: only check completion rate when there's enough terminal
+    # throughput to form a reliable ratio. At low throughput, a single
+    # slow or failed workflow would block HAPPY indefinitely.
+    total_terminal = (
+        primary.workflow_completion.success_per_sec + primary.workflow_completion.failed_per_sec
     )
+    if total_terminal >= 1.0:
+        return (
+            primary.workflow_completion.completion_rate
+            >= thresholds.workflow_completion_rate_healthy
+        )
+
+    # Low demand: throughput and backlog gates passed, completion rate
+    # is not meaningful — cluster is healthy.
+    return True
 
 
 def _apply_transition_invariant(

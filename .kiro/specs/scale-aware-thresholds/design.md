@@ -1004,6 +1004,147 @@ class ProfileComparison(BaseModel):
     deployment_diffs: list[DeploymentDiff] = []  # Backward compat: empty default
 ```
 
+### Layer 4: Deployment Profile Loading
+
+#### Profile Loader
+
+```python
+# copilot/profile_loader.py
+
+import json
+import logging
+from pathlib import Path
+
+import boto3
+from copilot_core.deployment import DeploymentProfile
+
+_log = logging.getLogger(__name__)
+
+
+def load_deployment_profile(location: str) -> DeploymentProfile:
+    """Load a DeploymentProfile from a local file or S3 URI.
+
+    Args:
+        location: Local file path or s3://bucket/key URI.
+
+    Returns:
+        Parsed DeploymentProfile.
+
+    Raises:
+        FileNotFoundError: If local file does not exist.
+        ValueError: If the JSON is not a valid DeploymentProfile.
+    """
+    if location.startswith("s3://"):
+        return _load_from_s3(location)
+    return _load_from_file(location)
+
+
+def _load_from_file(path: str) -> DeploymentProfile:
+    content = Path(path).read_text()
+    profile = DeploymentProfile.model_validate_json(content)
+    _log.info(
+        "Loaded deployment profile from file: preset=%s platform=%s",
+        profile.preset_name,
+        profile.resource_identity.platform_type if profile.resource_identity else "none",
+    )
+    return profile
+
+
+def _load_from_s3(uri: str) -> DeploymentProfile:
+    # Parse s3://bucket/key
+    parts = uri.removeprefix("s3://").split("/", 1)
+    bucket, key = parts[0], parts[1]
+    s3 = boto3.client("s3")
+    resp = s3.get_object(Bucket=bucket, Key=key)
+    content = resp["Body"].read().decode()
+    profile = DeploymentProfile.model_validate_json(content)
+    _log.info(
+        "Loaded deployment profile from S3: preset=%s platform=%s uri=%s",
+        profile.preset_name,
+        profile.resource_identity.platform_type if profile.resource_identity else "none",
+        uri,
+    )
+    return profile
+```
+
+#### Updated Worker Startup
+
+```python
+# copilot/worker.py (changes only)
+
+async def _start_workflows(client, task_queue):
+    # ...
+    deployment_profile_location = os.environ.get("DEPLOYMENT_PROFILE")
+    deployment_profile = None
+    if deployment_profile_location:
+        deployment_profile = load_deployment_profile(deployment_profile_location)
+
+    await client.start_workflow(
+        "ObserveClusterWorkflow",
+        ObserveClusterInput(
+            prometheus_endpoint=prometheus_endpoint,
+            dsql_endpoint=dsql_endpoint,
+            deployment_profile=deployment_profile,
+        ),
+        # ...
+    )
+```
+
+#### Updated ObserveClusterInput
+
+```python
+# copilot/models/workflow_inputs.py (changes only)
+
+class ObserveClusterInput(BaseModel):
+    prometheus_endpoint: str
+    dsql_endpoint: str
+    deployment_profile: DeploymentProfile | None = None  # Replaces resource_identity_json + threshold_overrides_json
+```
+
+#### Compose Inspector Config Parsing
+
+The Compose inspector does NOT parse compose files. All intended topology comes from the deployment profile (generated at compile time from `docker compose config` output). The inspector's sole responsibility is querying Docker API for runtime state.
+
+```bash
+# Generate deployment profile from resolved compose config
+docker compose -f dev/docker-compose.yml config | \
+    temporal-dsql-config compile starter \
+        --name dev \
+        --adapter compose \
+        --compose-config - \
+        --emit-deployment-profile dev/deployment-profile.json
+```
+
+#### Config Compiler Emit
+
+```bash
+# New CLI flag
+temporal-dsql-config compile mid-scale \
+    --name prod-v2 \
+    --emit-deployment-profile deployment-profile.json \
+    --adapter ecs \
+    --annotation dsql_endpoint=xxx.dsql.region.on.aws \
+    --annotation ecs_cluster_arn=arn:aws:ecs:...
+```
+
+#### Dev Compose Integration
+
+With Layer 4, the dev docker-compose.yml no longer needs `RESOURCE_IDENTITY_JSON`. Instead:
+
+1. Config Compiler emits `dev/deployment-profile.json` for the starter preset with compose adapter
+2. `copilot-worker` gets `DEPLOYMENT_PROFILE=./deployment-profile.json`
+3. Compose inspector reads the compose file path from `ResourceIdentity.platform_identifier`
+4. No Docker socket mount needed for config discovery (only for live container stats)
+
+```yaml
+# dev/docker-compose.yml (copilot-worker changes)
+copilot-worker:
+    environment:
+      - DEPLOYMENT_PROFILE=/app/deployment-profile.json
+    volumes:
+      - ./deployment-profile.json:/app/deployment-profile.json:ro
+```
+
 ## Data Models
 
 ### Complete Model Hierarchy

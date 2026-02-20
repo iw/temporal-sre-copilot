@@ -69,6 +69,16 @@ uv run temporal-dsql-config list-presets
 # Compile a named config
 uv run temporal-dsql-config compile mid-scale --name prod-v2
 
+# Compile with a deployment profile from an existing compose file
+uv run temporal-dsql-config compile starter --name dev \
+    --deployment compose --from dev/docker-compose.yml
+
+# Compile with a deployment profile for ECS
+uv run temporal-dsql-config compile mid-scale --name prod-v2 \
+    --deployment ecs \
+    -a dsql_endpoint=xxx.dsql.region.on.aws \
+    -a ecs_cluster_arn=arn:aws:ecs:region:account:cluster/name
+
 # Compile with modifier and overrides
 uv run temporal-dsql-config compile mid-scale \
     --name staging \
@@ -97,6 +107,7 @@ Compiled artifacts are written to `.temporal-dsql/<name>/`:
 │   ├── profile.json     # full ConfigProfile (used by explain --profile)
 │   ├── dynamic_config.yaml
 │   ├── dsql_plugin.json
+│   ├── deployment-profile.json  # DeploymentProfile (when --deployment used)
 │   └── ...              # SDK + platform adapter outputs
 └── staging/
     └── ...

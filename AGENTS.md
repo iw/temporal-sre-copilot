@@ -73,6 +73,7 @@ Three layers:
 1. **Scale-aware thresholds** (`copilot/models/config.py`) — `ScaleBand` enum, `ThresholdProfile` per band, `ThresholdOverrides` for operator customization. Band transitions use 10% hysteresis to prevent flapping.
 2. **Deployment profiles** (`copilot_core/deployment.py`) — `DeploymentProfile` captures what was deployed (scaling topology, resource identity). `DeploymentAdapter` protocol (ECS, Compose) renders profiles from config compiler output. Registered via `temporal_dsql.deployment_adapters` entry points.
 3. **Dynamic inspection** (`copilot/inspectors/`) — `PlatformInspector` protocol queries the live cluster for runtime state. ECS inspector queries DescribeServices + CloudWatch (`AWS/AuroraDSQL` namespace). Compose inspector queries Docker Engine API. `refine_thresholds()` adjusts thresholds based on actual vs expected capacity. Registered via `temporal_copilot.platform_inspectors` entry points.
+4. **Deployment profile loading** (`copilot/profile_loader.py`) — A single `DEPLOYMENT_PROFILE` env var (file path or `s3://` URI) loads the profile at worker boot and passes it to `ObserveClusterInput`. The config compiler's `--deployment compose --from <compose-file>` generates the profile from an existing compose file. For ECS, `--deployment ecs` with annotations.
 
 `evaluate_health_state()` returns a 3-tuple: `(HealthState, consecutive_critical_count, ScaleBand)`. The `ObserveClusterWorkflow` fetches deployment context every 10 cycles (5 minutes) and caches it between fetches.
 
@@ -86,7 +87,7 @@ The Config Compiler classifies every Temporal + DSQL parameter into SLO, Topolog
 - **Guard Rails** (`dsql_config/guard_rails.py`) — Validation rules that prevent unsafe configurations. All errors/warnings reported before halting.
 - **Adapters** (`dsql_config/adapters/`) — Protocol-based with `importlib.metadata.entry_points()` discovery. SDK adapters (Go, Python), platform adapters (ECS, Compose), and deployment adapters (ECS, Compose) are registered in `dsql_config`'s `pyproject.toml`.
 - **Explain** (`dsql_config/explain.py`) — Three levels of deterministic, template-based explanation. No LLM involvement. Uses registry metadata and compilation trace data.
-- **CLI** (`dsql_config/cli.py`) — Typer entry point: `temporal-dsql-config compile|list-presets|describe-preset|explain`
+- **CLI** (`dsql_config/cli.py`) — Typer entry point: `temporal-dsql-config compile|list-presets|describe-preset|explain`. The `compile` command supports `--deployment` (compose/ecs) with `--from` to generate a deployment profile from an existing platform config (e.g. docker-compose.yml).
 
 ## Behaviour Profile Architecture
 
@@ -144,6 +145,7 @@ temporal-sre-copilot/
 │           ├── models/             # Signal taxonomy, state machine, config, scale bands
 │           ├── db/                 # DSQL schema (includes profile_metadata table)
 │           ├── cli/                # Typer CLI (copilot db, copilot kb)
+│           ├── profile_loader.py   # Load DeploymentProfile from file or S3
 │           ├── api.py              # FastAPI app (mounts profile router)
 │           └── worker.py           # Worker entry point
 │
@@ -162,6 +164,8 @@ temporal-sre-copilot/
 │   ├── test_profile_api.py
 │   ├── test_serialization.py
 │   ├── test_scale_aware_thresholds.py
+│   ├── test_profile_loader.py
+│   ├── test_compose_config_resolution.py
 │   └── test_workflow_sandbox.py
 │
 ├── dev/                            # standalone dev environment
@@ -210,7 +214,7 @@ Individual commands:
 ```bash
 just install      # sync virtualenv
 just lint         # ruff check + ruff format
-just test         # pytest (193 tests, ~10s)
+just test         # pytest (214 tests, ~10s)
 just typing       # ty check
 ```
 
@@ -275,7 +279,6 @@ health_state, critical_count, scale_band = evaluate_health_state(
     signals.primary, current_state,
     current_scale_band=scale_band,
     deployment_context=context,
-    overrides=config.threshold_overrides,
 )
 explanation = await llm.explain(health_state, signals)
 
@@ -374,8 +377,11 @@ terraform/dev/
 The `copilot dev` subcommand group (in `packages/copilot/src/copilot/cli/dev.py`) orchestrates the full lifecycle. In a uv workspace monorepo, the `--package` flag is required: `uv run --package temporal-sre-copilot copilot dev ...`. The Justfile provides `just copilot` as shorthand.
 
 ```bash
+# Config profile
+just config compile starter --name dev --deployment compose --from dev/docker-compose.yml
+
 # Service lifecycle
-just copilot dev up              # Start all 15 services (detached)
+just copilot dev up              # Start all 15 services (requires compiled config profile)
 just copilot dev down            # Stop services
 just copilot dev down -v         # Stop + remove volumes
 just copilot dev ps              # Service status
@@ -397,3 +403,4 @@ just copilot dev infra destroy   # Tear down ephemeral AWS resources
 - `temporal-dsql-deploy` is still used for production ECS deployments and benchmarking
 - `dev/` is a standalone fork of the copilot profile — configs can evolve independently
 - The `temporal-dsql` repo remains an external dependency for building the Temporal server binary
+- `just config compile starter --name dev --deployment compose --from dev/docker-compose.yml` compiles the starter preset and generates a deployment profile from the compose file into `.temporal-dsql/dev/` — the copilot-worker reads it at boot via `DEPLOYMENT_PROFILE` env var

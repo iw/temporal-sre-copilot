@@ -34,10 +34,11 @@ with workflow.unsafe.imports_passed_through():
         ScaleBand,
         Signals,
         StoreSignalsInput,
-        ThresholdOverrides,
     )
     from copilot.models.state_machine import evaluate_health_state
-    from copilot_core.deployment import DeploymentContext, ResourceIdentity
+    from copilot_core.deployment import (
+        DeploymentContext,  # noqa: TC001 — used at runtime in workflow
+    )
 
 
 @workflow.defn
@@ -70,14 +71,16 @@ class ObserveClusterWorkflow:
         """Run the observation loop."""
         workflow.logger.info("ObserveClusterWorkflow started")
 
-        # Parse optional resource identity and threshold overrides from input
-        resource_identity: ResourceIdentity | None = None
-        if input.resource_identity_json:
-            resource_identity = ResourceIdentity.model_validate_json(input.resource_identity_json)
-
-        overrides: ThresholdOverrides | None = None
-        if input.threshold_overrides_json:
-            overrides = ThresholdOverrides.model_validate_json(input.threshold_overrides_json)
+        # Extract resource identity and derive initial scale band from deployment profile
+        resource_identity = None
+        if input.deployment_profile:
+            resource_identity = input.deployment_profile.resource_identity
+            self._current_scale_band = _preset_to_scale_band(input.deployment_profile.preset_name)
+            workflow.logger.info(
+                "Deployment profile loaded: preset=%s initial_band=%s",
+                input.deployment_profile.preset_name,
+                self._current_scale_band.value if self._current_scale_band else "none",
+            )
 
         # Reconcile with stored state before entering the loop.
         await self._reconcile_stored_state(input.dsql_endpoint)
@@ -127,7 +130,6 @@ class ObserveClusterWorkflow:
                         consecutive_critical_count=self._consecutive_critical_count,
                         current_scale_band=self._current_scale_band,
                         deployment_context=self._deployment_context,
-                        overrides=overrides,
                     )
                 )
 
@@ -210,3 +212,19 @@ class ObserveClusterWorkflow:
         if self._current_scale_band is None:
             return None
         return self._current_scale_band.value
+
+
+# Mapping from Config Compiler preset names to ScaleBand values
+_PRESET_SCALE_BAND_MAP: dict[str, ScaleBand] = {
+    "starter": ScaleBand.STARTER,
+    "mid-scale": ScaleBand.MID_SCALE,
+    "high-throughput": ScaleBand.HIGH_THROUGHPUT,
+}
+
+
+def _preset_to_scale_band(preset_name: str) -> ScaleBand | None:
+    """Map a Config Compiler preset name to a ScaleBand.
+
+    Returns None if the preset name is not recognized.
+    """
+    return _PRESET_SCALE_BAND_MAP.get(preset_name)

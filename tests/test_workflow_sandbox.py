@@ -205,8 +205,13 @@ async def test_signals_survive_sandbox_round_trip():
 
 with workflow.unsafe.imports_passed_through():
     from copilot.activities.inspect import FetchDeploymentContextInput
-    from copilot.models import ObserveClusterInput, ThresholdOverrides
-    from copilot_core.deployment import DeploymentContext, ResourceIdentity, ServiceReplicaState
+    from copilot.models import ObserveClusterInput
+    from copilot_core.deployment import (
+        DeploymentContext,
+        DeploymentProfile,
+        ResourceIdentity,
+        ServiceReplicaState,
+    )
 
 
 @activity.defn(name="fetch_deployment_context")
@@ -224,20 +229,22 @@ async def fake_fetch_deployment_context(
 
 
 async def test_observe_cluster_input_with_scale_fields():
-    """ObserveClusterInput with resource_identity and threshold_overrides
-    serializes through Temporal."""
-    identity = ResourceIdentity(
-        dsql_endpoint="test.dsql.eu-west-1.on.aws",
-        platform_identifier="temporal-dev",
-        platform_type="compose",
+    """ObserveClusterInput with deployment_profile serializes through Temporal."""
+    profile = DeploymentProfile(
+        preset_name="starter",
+        throughput_range_min=0.0,
+        throughput_range_max=50.0,
+        resource_identity=ResourceIdentity(
+            dsql_endpoint="test.dsql.eu-west-1.on.aws",
+            platform_identifier="temporal-dev",
+            platform_type="compose",
+        ),
     )
-    overrides = ThresholdOverrides(persistence_latency_p99_max_ms=300.0)
 
     original = ObserveClusterInput(
         prometheus_endpoint="http://mimir:9009/prometheus",
         dsql_endpoint="test.dsql.eu-west-1.on.aws",
-        resource_identity_json=identity.model_dump_json(),
-        threshold_overrides_json=overrides.model_dump_json(),
+        deployment_profile=profile,
     )
 
     from pydantic import TypeAdapter
@@ -245,14 +252,10 @@ async def test_observe_cluster_input_with_scale_fields():
 
     json_bytes = to_json(original)
     restored = TypeAdapter(ObserveClusterInput).validate_json(json_bytes)
-    assert restored.resource_identity_json is not None
-    assert restored.threshold_overrides_json is not None
-
-    # Verify the JSON can be parsed back into the models
-    ri = ResourceIdentity.model_validate_json(restored.resource_identity_json)
-    assert ri.platform_type == "compose"
-    ov = ThresholdOverrides.model_validate_json(restored.threshold_overrides_json)
-    assert ov.persistence_latency_p99_max_ms == 300.0
+    assert restored.deployment_profile is not None
+    assert restored.deployment_profile.preset_name == "starter"
+    assert restored.deployment_profile.resource_identity is not None
+    assert restored.deployment_profile.resource_identity.platform_type == "compose"
 
 
 async def test_fetch_deployment_context_input_serializes():

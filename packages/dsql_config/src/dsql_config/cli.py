@@ -18,6 +18,7 @@ from rich.table import Table
 
 from copilot_core.types import ParameterOverrides
 from dsql_config.compiler import CompilationError, ConfigCompiler
+from dsql_config.models import ConfigProfile  # noqa: TC001 — used in function signature
 from dsql_config.registry import build_default_registry
 
 app = typer.Typer(
@@ -134,6 +135,22 @@ def compile(
     format: Annotated[
         str, typer.Option("--format", "-f", help="Output format: text or json")
     ] = "text",
+    deployment: Annotated[
+        str | None,
+        typer.Option("--deployment", "-d", help="Deployment platform (compose, ecs)"),
+    ] = None,
+    from_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--from",
+            help="Existing platform config (docker-compose.yml or ECS task def). "
+            "Resolved via `docker compose config` for compose.",
+        ),
+    ] = None,
+    annotation: Annotated[
+        list[str] | None,
+        typer.Option("--annotation", "-a", help="Deployment adapter annotation (key=value)"),
+    ] = None,
 ) -> None:
     """Compile a scale preset into configuration artifacts."""
     compiler = _build_compiler()
@@ -189,6 +206,84 @@ def compile(
                 for gr in result.guard_rail_results:
                     color = "yellow" if gr.severity == "warning" else "red"
                     console.print(f"  [{color}]{gr.severity}[/{color}]: {gr.message}")
+
+    # Emit deployment profile if --deployment is specified
+    if deployment:
+        _emit_deployment_profile(
+            result.profile,
+            deployment=deployment,
+            from_path=from_path,
+            annotations=annotation or [],
+            output_dir=target if should_write else None,
+        )
+
+
+def _emit_deployment_profile(
+    profile: ConfigProfile,
+    *,
+    deployment: str,
+    from_path: Path | None,
+    annotations: list[str],
+    output_dir: Path | None,
+) -> None:
+    """Generate a DeploymentProfile and write it alongside other artifacts.
+
+    For compose: resolves the compose file via ``docker compose config``
+    to extract DSQL endpoint and resource limits. If ``--from`` is omitted,
+    generates a prototypical compose deployment with defaults.
+
+    For ecs: uses annotations for cluster ARN, DSQL endpoint, etc.
+    """
+    import subprocess
+
+    from dsql_config.adapters import discover_deployment_adapters
+
+    # Parse annotations
+    ann: dict[str, str] = {}
+    for item in annotations:
+        if "=" not in item:
+            console.print(f"[red]Invalid annotation: '{item}'. Use key=value[/red]")
+            raise typer.Exit(1)
+        k, v = item.split("=", 1)
+        ann[k.strip()] = v.strip()
+
+    # Resolve compose config from --from path
+    if deployment == "compose" and from_path:
+        try:
+            result = subprocess.run(  # noqa: S603
+                ["docker", "compose", "-f", str(from_path), "config"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            ann["compose_config"] = result.stdout
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            console.print(f"[red]Failed to resolve compose config: {exc}[/red]")
+            raise typer.Exit(1) from None
+
+    # Find the adapter
+    adapters = discover_deployment_adapters()
+    matched = [a for a in adapters if a.platform == deployment]
+    if not matched:
+        available = [a.platform for a in adapters]
+        console.print(f"[red]Unknown deployment '{deployment}'. Available: {available}[/red]")
+        raise typer.Exit(1)
+
+    deployment_profile = matched[0].render_deployment(profile, ann)
+
+    # Validate round-trip
+    from copilot_core.deployment import DeploymentProfile
+
+    json_str = deployment_profile.model_dump_json(indent=2)
+    DeploymentProfile.model_validate_json(json_str)
+
+    # Write output
+    if output_dir:
+        output_path = output_dir / "deployment-profile.json"
+        output_path.write_text(json_str + "\n")
+        console.print(f"[green]Deployment profile written to {output_path}[/green]")
+    else:
+        console.print(json_str)
 
 
 @app.command("list-presets")

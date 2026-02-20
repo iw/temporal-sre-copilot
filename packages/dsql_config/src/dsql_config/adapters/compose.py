@@ -1,5 +1,12 @@
 """Docker Compose platform adapter — renders per-service environment variable maps."""
 
+from __future__ import annotations
+
+import contextlib
+import logging
+
+import yaml
+
 from copilot_core.deployment import (
     AutoscalerType,
     DeploymentProfile,
@@ -11,6 +18,8 @@ from copilot_core.deployment import (
 from dsql_config.adapters.ecs import _DSQL_ENV_MAP
 from dsql_config.models import ConfigProfile, RenderedSnippet
 from dsql_config.presets import PRESETS
+
+_log = logging.getLogger(__name__)
 
 
 class ComposeAdapter:
@@ -74,9 +83,27 @@ class ComposeDeploymentAdapter:
         profile: ConfigProfile,
         annotations: dict[str, str],
     ) -> DeploymentProfile:
+        """Produce a DeploymentProfile for a Docker Compose deployment.
+
+        Compose services are fixed at 1 replica with no autoscaler.
+
+        Annotations:
+        - dsql_endpoint: DSQL cluster endpoint (required unless compose_config provided)
+        - compose_project_name: Docker Compose project name (default: temporal-sre-copilot)
+        - compose_config: Resolved YAML from `docker compose config` (optional).
+          When provided, service resource limits and DSQL endpoint are extracted
+          from the realized compose configuration.
+        - {service}_cpu_limit, {service}_memory_limit: Manual overrides (optional)
+        """
+        compose_config = annotations.get("compose_config")
+        resolved = _parse_compose_config(compose_config) if compose_config else {}
+
         def _fixed_bounds(service: str) -> ServiceScalingBounds:
-            cpu = annotations.get(f"{service}_cpu_limit")
-            mem = annotations.get(f"{service}_memory_limit")
+            # Manual annotations take precedence over compose config
+            cpu = annotations.get(f"{service}_cpu_limit") or resolved.get(f"{service}_cpu_limit")
+            mem = annotations.get(f"{service}_memory_limit") or resolved.get(
+                f"{service}_memory_limit"
+            )
             return ServiceScalingBounds(
                 min_replicas=1,
                 max_replicas=1,
@@ -85,6 +112,12 @@ class ComposeDeploymentAdapter:
                     memory_mib=int(mem) if mem else None,
                 ),
             )
+
+        # DSQL endpoint: annotation > compose config > error
+        dsql_endpoint = annotations.get("dsql_endpoint") or resolved.get("dsql_endpoint")
+        if not dsql_endpoint:
+            msg = "dsql_endpoint required: provide via annotation or compose config"
+            raise KeyError(msg)
 
         preset = PRESETS.get(profile.preset_name)
         throughput_min = preset.throughput_range.min_st_per_sec if preset else 0.0
@@ -102,8 +135,91 @@ class ComposeDeploymentAdapter:
                 autoscaler_type=AutoscalerType.FIXED,
             ),
             resource_identity=ResourceIdentity(
-                dsql_endpoint=annotations["dsql_endpoint"],
+                dsql_endpoint=dsql_endpoint,
                 platform_identifier=annotations.get("compose_project_name", "temporal-sre-copilot"),
                 platform_type="compose",
             ),
         )
+
+
+# Temporal service name patterns in compose files
+_TEMPORAL_SERVICES = ("history", "matching", "frontend", "worker")
+
+
+def _parse_compose_config(yaml_content: str) -> dict[str, str]:
+    """Parse resolved `docker compose config` YAML to extract deployment info.
+
+    Extracts:
+    - DSQL endpoint from TEMPORAL_SQL_HOST env var on any temporal service
+    - Resource limits (cpu, memory) from deploy.resources.limits per service
+    """
+    result: dict[str, str] = {}
+    try:
+        config = yaml.safe_load(yaml_content)
+    except yaml.YAMLError:
+        _log.warning("Failed to parse compose config YAML")
+        return result
+
+    if not isinstance(config, dict):
+        return result
+
+    services = config.get("services", {})
+    for svc_name, svc_def in services.items():
+        if not isinstance(svc_def, dict):
+            continue
+
+        # Match temporal service names (e.g., temporal-history, temporal-dsql-history)
+        matched_service = None
+        for ts in _TEMPORAL_SERVICES:
+            if ts in svc_name.lower():
+                matched_service = ts
+                break
+        if not matched_service:
+            continue
+
+        # Extract DSQL endpoint from environment
+        env = svc_def.get("environment", {})
+        if isinstance(env, dict):
+            dsql_host = env.get("TEMPORAL_SQL_HOST")
+            if dsql_host and "dsql_endpoint" not in result:
+                result["dsql_endpoint"] = str(dsql_host)
+        elif isinstance(env, list):
+            for item in env:
+                if isinstance(item, str) and item.startswith("TEMPORAL_SQL_HOST="):
+                    result.setdefault("dsql_endpoint", item.split("=", 1)[1])
+
+        # Extract resource limits from deploy.resources.limits
+        deploy = svc_def.get("deploy", {})
+        resources = deploy.get("resources", {}) if isinstance(deploy, dict) else {}
+        limits = resources.get("limits", {}) if isinstance(resources, dict) else {}
+        if isinstance(limits, dict):
+            cpus = limits.get("cpus")
+            if cpus:
+                with contextlib.suppress(ValueError, TypeError):
+                    result[f"{matched_service}_cpu_limit"] = str(int(float(cpus) * 1000))
+            memory = limits.get("memory")
+            if memory:
+                result[f"{matched_service}_memory_limit"] = str(_parse_memory_mib(memory))
+
+    return result
+
+
+def _parse_memory_mib(value: str | int | float) -> int:
+    """Parse a Docker memory string (e.g., '512M', '1G') to MiB."""
+    if isinstance(value, (int, float)):
+        return int(value / (1024 * 1024))  # bytes to MiB
+    s = str(value).strip().upper()
+    if s.endswith("G") or s.endswith("GB"):
+        num = s.rstrip("GB").strip()
+        return int(float(num) * 1024)
+    if s.endswith("M") or s.endswith("MB"):
+        num = s.rstrip("MB").strip()
+        return int(float(num))
+    if s.endswith("K") or s.endswith("KB"):
+        num = s.rstrip("KB").strip()
+        return max(1, int(float(num) / 1024))
+    # Assume bytes
+    try:
+        return max(1, int(int(s) / (1024 * 1024)))
+    except ValueError:
+        return 0

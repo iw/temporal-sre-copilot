@@ -102,6 +102,18 @@ def _run(cmd: list[str], *, check: bool = True) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Deployment profile generation
+# ---------------------------------------------------------------------------
+
+
+def _config_dir(name: str) -> Path:
+    """Return the path to a named config profile under ``.temporal-dsql/``."""
+    # Normalize for filesystem safety
+    safe_name = name.replace("/", "-").replace("\\", "-").strip("-")
+    return _repo_root() / ".temporal-dsql" / safe_name
+
+
+# ---------------------------------------------------------------------------
 # Service lifecycle
 # ---------------------------------------------------------------------------
 
@@ -109,9 +121,26 @@ def _run(cmd: list[str], *, check: bool = True) -> None:
 @app.command()
 def up(
     detach: Annotated[bool, typer.Option("--detach", "-d", help="Run in detached mode")] = True,
+    config: Annotated[str, typer.Option("--config", "-c", help="Config profile name")] = "dev",
 ) -> None:
-    """Start all Docker Compose services."""
+    """Start all Docker Compose services.
+
+    Requires a compiled config profile with a deployment profile. Run
+    ``just config compile starter --name dev --deployment compose
+    --from dev/docker-compose.yml`` first.
+    """
     console.print(Panel.fit("Starting Dev Environment", style="bold blue"))
+
+    profile_path = _config_dir(config) / "deployment-profile.json"
+    if not profile_path.exists():
+        console.print(f"[red]Deployment profile not found:[/red] {profile_path}")
+        console.print(
+            f"  Run: just config compile starter --name {config} "
+            "--deployment compose --from dev/docker-compose.yml"
+        )
+        raise typer.Exit(1)
+
+    console.print(f"[dim]Using config profile: {config}[/dim]")
     cmd = _compose_cmd("up")
     if detach:
         cmd.append("-d")

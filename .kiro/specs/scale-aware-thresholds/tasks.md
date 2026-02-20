@@ -236,3 +236,75 @@
 - [x] Verify adapter and inspector discovery works with `discover_deployment_adapters()` and `discover_platform_inspectors()`
 
 **Requirements:** R11, R16
+
+
+## Layer 4: Deployment Profile Loading
+
+### Task 23: Profile loader module
+- [x] Create `packages/copilot/src/copilot/profile_loader.py`
+- [x] Implement `load_deployment_profile(location: str) -> DeploymentProfile` that dispatches on `s3://` prefix
+- [x] Implement `_load_from_file(path)` using `Path.read_text()` + `DeploymentProfile.model_validate_json()`
+- [x] Implement `_load_from_s3(uri)` using boto3 `get_object` + `DeploymentProfile.model_validate_json()`
+- [x] Log preset name, platform type, and DSQL endpoint on successful load
+- [x] Raise `FileNotFoundError` for missing local files, `ValueError` for invalid JSON
+
+**Requirements:** R25 (Deployment Profile Location)
+
+### Task 24: Update ObserveClusterInput
+- [x] Replace `resource_identity_json: str | None` and `threshold_overrides_json: str | None` with `deployment_profile: DeploymentProfile | None = None` on `ObserveClusterInput`
+- [x] Update `ObserveClusterWorkflow.run()` to extract `ResourceIdentity` from `deployment_profile.resource_identity`
+- [x] Derive initial scale band from `deployment_profile.preset_name` when available (map preset name to ScaleBand)
+- [x] Update all callers and tests that reference the old fields
+- [x] Verify Temporal data converter serialization with the new field
+
+**Requirements:** R28 (ObserveClusterInput Simplification)
+
+### Task 25: Update worker startup
+- [x] Read `DEPLOYMENT_PROFILE` env var in `worker.py`
+- [x] Call `load_deployment_profile()` when set, pass result to `ObserveClusterInput`
+- [x] Remove `RESOURCE_IDENTITY_JSON` and `THRESHOLD_OVERRIDES_JSON` env var handling
+- [x] Update worker docstring with new env var documentation
+- [x] Log loaded profile details at startup
+
+**Requirements:** R25 (Deployment Profile Location)
+
+### Task 26: Compose deployment adapter config resolution
+- [x] Update `ComposeDeploymentAdapter.render_deployment()` to accept resolved YAML (from `docker compose config`) as an annotation or direct input
+- [x] Parse the resolved YAML to extract service definitions, replica counts, resource limits, and DSQL endpoint from interpolated env vars
+- [x] Add `--compose-config` flag to the Config Compiler `compile` command that pipes `docker compose config` output to the Compose adapter
+- [x] Support accepting resolved YAML from stdin (for `docker compose config | temporal-dsql-config compile ...`)
+- [x] Remove any compose file parsing from `ComposeInspector` — inspector only queries Docker API for runtime state
+- [x] Remove `compose_file` field from `ResourceIdentity` if it was added
+
+**Requirements:** R26 (Compose Config Resolution)
+
+### Task 27: Config Compiler --emit-deployment-profile
+- [x] Add `--emit-deployment-profile` option to the `compile` command in `dsql_config/cli.py`
+- [x] Add `--adapter` option to select the deployment adapter (ecs, compose)
+- [x] Add `--annotation` repeatable option for key=value pairs passed to the adapter
+- [x] Invoke `DeploymentAdapter.render_deployment()` with the compiled profile and annotations
+- [x] Write the resulting `DeploymentProfile` JSON to the specified path (or stdout with `-`)
+- [x] Validate the emitted JSON round-trips through `DeploymentProfile.model_validate_json()`
+
+**Requirements:** R27 (Config Compiler Profile Emit)
+
+### Task 28: Dev Compose integration
+- [x] Generate `dev/deployment-profile.json` using the config compiler with starter preset + compose adapter
+- [x] Update `dev/docker-compose.yml` copilot-worker to mount and reference the profile file
+- [x] Remove `RESOURCE_IDENTITY_JSON` env var from copilot-worker service
+- [x] Keep Docker socket mount (needed for live container stats, not config discovery)
+- [x] Update `dev/.env.example` to remove any RESOURCE_IDENTITY references
+- [x] Update README Quick start to reflect the new flow
+
+**Requirements:** R25, R26, R27
+
+### Task 29: Tests for profile loading
+- [x] Unit test: load from local file (valid JSON, invalid JSON, missing file)
+- [x] Unit test: load from S3 URI (mock boto3)
+- [x] Unit test: ObserveClusterInput with DeploymentProfile serializes through Temporal data converter
+- [x] Unit test: worker startup with DEPLOYMENT_PROFILE env var
+- [x] Unit test: Compose deployment adapter parses resolved YAML from `docker compose config`
+- [x] Unit test: Compose inspector does NOT attempt to parse compose files (only Docker API)
+- [x] Property test: any valid DeploymentProfile written to file and loaded back is equivalent
+
+**Requirements:** R25, R26, R28

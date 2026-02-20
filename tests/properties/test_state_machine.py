@@ -167,12 +167,17 @@ def test_healthy_signals_produce_happy(current_state: HealthState):
 @given(current_state=health_states)
 @settings(max_examples=100)
 def test_collapsed_throughput_not_happy(current_state: HealthState):
-    """Collapsed throughput is never HAPPY."""
+    """Collapsed throughput with active demand is never HAPPY.
+
+    Zero throughput alone is idle (HAPPY). But zero throughput WITH
+    active demand (completions flowing, backlog present) means
+    forward progress has collapsed.
+    """
     collapsed = PrimarySignals(
         state_transitions={"throughput_per_sec": 0, "latency_p95_ms": 10, "latency_p99_ms": 20},
         workflow_completion={"completion_rate": 0.99, "success_per_sec": 100, "failed_per_sec": 0},
         history={
-            "backlog_age_sec": 1,
+            "backlog_age_sec": 10,
             "task_processing_rate_per_sec": 200,
             "shard_churn_rate_per_sec": 0,
         },
@@ -312,6 +317,34 @@ def test_idle_detection_near_zero_noise():
     assert _is_idle(signals)
 
 
+def test_idle_detection_system_workflow_noise():
+    """System workflow noise (2-5 st/s from shard claims) is still idle.
+
+    At startup, Temporal generates background activity from shard
+    acquisition, system workflows, and membership protocol. This
+    should not prevent idle detection.
+    """
+    signals = PrimarySignals(
+        state_transitions={"throughput_per_sec": 3.0, "latency_p95_ms": 50, "latency_p99_ms": 100},
+        workflow_completion={"completion_rate": 1.0, "success_per_sec": 0, "failed_per_sec": 0},
+        history={
+            "backlog_age_sec": 2.0,
+            "task_processing_rate_per_sec": 3.0,
+            "shard_churn_rate_per_sec": 0.5,
+        },
+        frontend={"error_rate_per_sec": 0, "latency_p95_ms": 50, "latency_p99_ms": 100},
+        matching={"workflow_backlog_age_sec": 0, "activity_backlog_age_sec": 0},
+        poller={"poll_success_rate": 0.99, "poll_timeout_rate": 0.01, "long_poll_latency_ms": 10},
+        persistence={
+            "latency_p95_ms": 20,
+            "latency_p99_ms": 50,
+            "error_rate_per_sec": 0,
+            "retry_rate_per_sec": 0,
+        },
+    )
+    assert _is_idle(signals)
+
+
 # === ANTI-FLAP: Critical requires sustained conditions ===
 
 
@@ -392,3 +425,70 @@ def test_low_completion_rate_during_ramp_up_not_critical():
         consecutive_critical_count=CONSECUTIVE_CRITICAL_THRESHOLD,
     )
     assert result != HealthState.CRITICAL
+
+
+# === DEMAND-GATING: Long-poll contamination ===
+
+
+@given(current_state=health_states)
+@settings(max_examples=100)
+def test_long_poll_contamination_not_stressed(current_state: HealthState):
+    """High frontend latency from long-polls on idle cluster is not STRESSED.
+
+    On low-throughput clusters, long-poll operations (workers waiting ~90s
+    for tasks) inflate frontend latency p99 to ~90-100s. This is expected
+    behavior, not degradation. The state machine should recognize this as
+    idle and return HAPPY.
+    """
+    signals = PrimarySignals(
+        state_transitions={"throughput_per_sec": 2.0, "latency_p95_ms": 9, "latency_p99_ms": 15},
+        workflow_completion={"completion_rate": 1.0, "success_per_sec": 0, "failed_per_sec": 0},
+        history={
+            "backlog_age_sec": 0,
+            "task_processing_rate_per_sec": 2.0,
+            "shard_churn_rate_per_sec": 0,
+        },
+        frontend={"error_rate_per_sec": 0, "latency_p95_ms": 92000, "latency_p99_ms": 98000},
+        matching={"workflow_backlog_age_sec": 0, "activity_backlog_age_sec": 0},
+        poller={
+            "poll_success_rate": 0.52,
+            "poll_timeout_rate": 0.48,
+            "long_poll_latency_ms": 95000,
+        },
+        persistence={
+            "latency_p95_ms": 10,
+            "latency_p99_ms": 20,
+            "error_rate_per_sec": 0,
+            "retry_rate_per_sec": 0,
+        },
+    )
+    result, _, _ = evaluate_health_state(signals, current_state)
+    assert result == HealthState.HAPPY
+
+
+def test_high_frontend_latency_stressed_under_load():
+    """High frontend latency WITH real throughput IS stressed.
+
+    When there's meaningful demand (>5 st/s), high frontend latency
+    is a real problem, not a long-poll artifact.
+    """
+    signals = PrimarySignals(
+        state_transitions={"throughput_per_sec": 50, "latency_p95_ms": 50, "latency_p99_ms": 100},
+        workflow_completion={"completion_rate": 0.95, "success_per_sec": 45, "failed_per_sec": 2},
+        history={
+            "backlog_age_sec": 5,
+            "task_processing_rate_per_sec": 50,
+            "shard_churn_rate_per_sec": 0,
+        },
+        frontend={"error_rate_per_sec": 0, "latency_p95_ms": 5000, "latency_p99_ms": 10000},
+        matching={"workflow_backlog_age_sec": 0, "activity_backlog_age_sec": 0},
+        poller={"poll_success_rate": 0.95, "poll_timeout_rate": 0.05, "long_poll_latency_ms": 100},
+        persistence={
+            "latency_p95_ms": 50,
+            "latency_p99_ms": 100,
+            "error_rate_per_sec": 0,
+            "retry_rate_per_sec": 0,
+        },
+    )
+    result, _, _ = evaluate_health_state(signals, HealthState.HAPPY)
+    assert result == HealthState.STRESSED

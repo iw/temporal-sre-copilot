@@ -21,6 +21,8 @@ PydanticAIPlugin to properly serialize these Pydantic models:
 
 from pydantic import BaseModel, Field
 
+from copilot_core.deployment import DeploymentProfile  # noqa: TC001 — Pydantic needs runtime
+
 from .signals import HealthState, Signals  # noqa: TC001 — Pydantic needs runtime imports
 
 
@@ -33,13 +35,9 @@ class ObserveClusterInput(BaseModel):
 
     prometheus_endpoint: str = Field(description="Prometheus-compatible query endpoint URL")
     dsql_endpoint: str = Field(description="DSQL cluster endpoint for state storage")
-    resource_identity_json: str | None = Field(
+    deployment_profile: DeploymentProfile | None = Field(
         default=None,
-        description="Serialized ResourceIdentity JSON for deployment context inspection",
-    )
-    threshold_overrides_json: str | None = Field(
-        default=None,
-        description="Serialized ThresholdOverrides JSON for per-threshold tuning",
+        description="Deployment profile with resource identity and scaling topology",
     )
 
 

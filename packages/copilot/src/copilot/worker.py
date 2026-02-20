@@ -12,12 +12,13 @@ Usage:
     uv run python -m copilot.worker
 
 Environment variables:
-    TEMPORAL_ADDRESS   - Temporal server address (default: localhost:7233)
-    TEMPORAL_NAMESPACE - Temporal namespace (default: default)
-    COPILOT_TASK_QUEUE - Task queue name (default: copilot-task-queue)
+    TEMPORAL_ADDRESS       - Temporal server address (default: localhost:7233)
+    TEMPORAL_NAMESPACE     - Temporal namespace (default: default)
+    COPILOT_TASK_QUEUE     - Task queue name (default: copilot-task-queue)
     PROMETHEUS_ENDPOINT    - Prometheus-compatible query endpoint
     COPILOT_DSQL_ENDPOINT  - Copilot Aurora DSQL cluster endpoint
     KNOWLEDGE_BASE_ID      - Bedrock Knowledge Base ID (optional)
+    DEPLOYMENT_PROFILE     - Path or s3:// URI to deployment profile JSON (optional)
 """
 
 import asyncio
@@ -56,6 +57,7 @@ async def _start_workflows(
     dsql_endpoint = os.environ.get("COPILOT_DSQL_ENDPOINT", "")
     loki_url = os.environ.get("LOKI_URL", "")
     kb_id = os.environ.get("KNOWLEDGE_BASE_ID")
+    deployment_profile_location = os.environ.get("DEPLOYMENT_PROFILE")
 
     if not prometheus_endpoint:
         logger.warning("PROMETHEUS_ENDPOINT not set, skipping workflow start")
@@ -64,6 +66,14 @@ async def _start_workflows(
         logger.warning("COPILOT_DSQL_ENDPOINT not set, skipping workflow start")
         return
 
+    # Load deployment profile if configured
+    deployment_profile = None
+    if deployment_profile_location:
+        from copilot.profile_loader import load_deployment_profile
+
+        deployment_profile = load_deployment_profile(deployment_profile_location)
+        logger.info("Deployment profile loaded from %s", deployment_profile_location)
+
     # 1. ObserveClusterWorkflow
     logger.info("Starting ObserveClusterWorkflow: %s", OBSERVE_WORKFLOW_ID)
     await client.start_workflow(
@@ -71,6 +81,7 @@ async def _start_workflows(
         ObserveClusterInput(
             prometheus_endpoint=prometheus_endpoint,
             dsql_endpoint=dsql_endpoint,
+            deployment_profile=deployment_profile,
         ),
         id=OBSERVE_WORKFLOW_ID,
         task_queue=task_queue,

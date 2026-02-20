@@ -64,6 +64,14 @@ cp dev/.env.example dev/.env
 #   COPILOT_KNOWLEDGE_BASE_ID  — Bedrock KB ID (optional)
 ```
 
+### Compile config profile
+
+```bash
+just config compile starter --name dev --deployment compose --from dev/docker-compose.yml
+```
+
+Compiles the starter preset and generates a deployment profile from the dev compose file. All artifacts are written to `.temporal-dsql/dev/`.
+
 ### Build and start
 
 ```bash
@@ -155,11 +163,12 @@ A 2 wf/s dev cluster and a 500 wf/s production cluster have very different "norm
 
 Band transitions use 10% hysteresis to prevent flapping at boundaries (e.g. oscillating around 50 st/s won't flip between Starter and Mid-scale).
 
-Three layers build on each other:
+Four layers build on each other:
 
 1. **Scale-aware thresholds** — `ScaleBand` classification + `ThresholdProfile` per band. Eliminates the dead zone where low-throughput clusters were incorrectly flagged as Stressed.
 2. **Deployment profiles** — `DeploymentProfile` captures what was deployed (scaling topology, resource identity). Deployment adapters (ECS, Compose) render profiles from config compiler output.
 3. **Dynamic inspection** — `PlatformInspector` queries the live cluster (ECS DescribeServices, CloudWatch, Docker API) for runtime state. `refine_thresholds()` adjusts thresholds based on actual vs expected capacity — more History replicas tightens latency gates, fewer loosens them.
+4. **Deployment profile loading** — A single `DEPLOYMENT_PROFILE` env var (file path or `s3://` URI) loads the profile at worker boot. The config compiler's `--deployment compose --from <compose-file>` flag generates the profile from an existing compose file. For ECS, `--deployment ecs` with annotations does the same.
 
 Operators can override any threshold via `ThresholdOverrides` in `CopilotConfig` without touching the profile system.
 
@@ -356,7 +365,7 @@ temporal-sre-copilot/
 │   ├── behaviour_profiles/         # profile store + API
 │   └── copilot/                    # orchestrator (depends on all three)
 ├── dev/                            # standalone dev environment (Docker Compose)
-├── tests/                          # shared test directory (193 tests, ~10s)
+├── tests/                          # shared test directory (214 tests, ~10s)
 │   └── properties/                 # Hypothesis property-based tests
 ├── terraform/                      # modular infrastructure
 ├── grafana/                        # dashboards
@@ -392,7 +401,7 @@ dsql_config  behaviour_profiles  │
 ## Tests
 
 ```bash
-just test              # 193 tests, ~10s
+just test              # 214 tests, ~10s
 just lint              # ruff check + format
 just typing            # ty check
 just check-all         # all three
