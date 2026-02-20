@@ -32,7 +32,19 @@ Anti-flap Design:
 - Healthy thresholds are workload-relative, not absolute
 """
 
-from .config import CriticalThresholds, HealthyThresholds, StressedThresholds
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from .config import (
+    CriticalThresholds,
+    HealthyThresholds,
+    ScaleBand,
+    StressedThresholds,
+    ThresholdOverrides,
+    ThresholdProfile,
+    get_threshold_profile,
+)
 from .signals import (
     BottleneckClassification,
     HealthState,
@@ -40,9 +52,133 @@ from .signals import (
     WorkerSignals,
 )
 
+if TYPE_CHECKING:
+    from copilot_core.deployment import DeploymentContext
+
 # How many consecutive evaluations must show Critical before we transition.
 # At 30s observation intervals, 3 consecutive = 90 seconds of sustained failure.
 CONSECUTIVE_CRITICAL_THRESHOLD = 3
+
+# =============================================================================
+# SCALE BAND CLASSIFICATION
+# =============================================================================
+
+# 10% hysteresis at each boundary to prevent rapid oscillation.
+_HYSTERESIS_FACTOR = 0.10
+
+# Boundaries aligned with Config Compiler preset ThroughputRange.
+_STARTER_MID_BOUNDARY = 50.0
+_MID_HIGH_BOUNDARY = 500.0
+
+
+def classify_scale_band(
+    throughput_per_sec: float,
+    current_band: ScaleBand | None = None,
+) -> ScaleBand:
+    """Classify throughput into a scale band with hysteresis.
+
+    When current_band is provided, the boundary is shifted by 10%
+    to prevent rapid oscillation. For example, the starter→mid-scale
+    boundary at 50 st/sec becomes:
+    - 55 st/sec to transition UP from starter to mid-scale
+    - 45 st/sec to transition DOWN from mid-scale to starter
+
+    Args:
+        throughput_per_sec: Current observed state transitions per second.
+        current_band: The band from the previous evaluation cycle.
+
+    Returns:
+        The classified ScaleBand.
+    """
+    # Defensive: AMP can return NaN for missing metrics
+    if throughput_per_sec != throughput_per_sec or throughput_per_sec < 0:  # NaN check
+        throughput_per_sec = 0.0
+
+    if current_band is None:
+        if throughput_per_sec < _STARTER_MID_BOUNDARY:
+            return ScaleBand.STARTER
+        elif throughput_per_sec < _MID_HIGH_BOUNDARY:
+            return ScaleBand.MID_SCALE
+        else:
+            return ScaleBand.HIGH_THROUGHPUT
+
+    match current_band:
+        case ScaleBand.STARTER:
+            if throughput_per_sec >= _STARTER_MID_BOUNDARY * (1 + _HYSTERESIS_FACTOR):
+                return ScaleBand.MID_SCALE
+            return ScaleBand.STARTER
+        case ScaleBand.MID_SCALE:
+            if throughput_per_sec < _STARTER_MID_BOUNDARY * (1 - _HYSTERESIS_FACTOR):
+                return ScaleBand.STARTER
+            if throughput_per_sec >= _MID_HIGH_BOUNDARY * (1 + _HYSTERESIS_FACTOR):
+                return ScaleBand.HIGH_THROUGHPUT
+            return ScaleBand.MID_SCALE
+        case ScaleBand.HIGH_THROUGHPUT:
+            if throughput_per_sec < _MID_HIGH_BOUNDARY * (1 - _HYSTERESIS_FACTOR):
+                return ScaleBand.MID_SCALE
+            return ScaleBand.HIGH_THROUGHPUT
+
+
+# =============================================================================
+# THRESHOLD REFINEMENT (Layer 3)
+# =============================================================================
+
+# Default History replica counts per scale band (topology defaults).
+_DEFAULT_HISTORY_REPLICAS: dict[ScaleBand, int] = {
+    ScaleBand.STARTER: 2,
+    ScaleBand.MID_SCALE: 6,
+    ScaleBand.HIGH_THROUGHPUT: 8,
+}
+
+
+def refine_thresholds(
+    profile: ThresholdProfile,
+    context: DeploymentContext,
+) -> ThresholdProfile:
+    """Refine a threshold profile using deployment context.
+
+    When the actual History replica count differs from the scale band's
+    topology default, thresholds are adjusted proportionally:
+    - More replicas → tighter thresholds (more capacity = higher expectations)
+    - Fewer replicas → looser thresholds (less capacity = lower expectations)
+
+    The adjustment factor is clamped to [0.5, 2.0] to prevent extreme swings.
+    When the autoscaler is actively scaling up, tightening is suppressed.
+    """
+    default_replicas = _DEFAULT_HISTORY_REPLICAS.get(profile.scale_band, 2)
+    actual_replicas = context.history.running
+
+    if actual_replicas == 0 or default_replicas == 0:
+        return profile
+
+    ratio = actual_replicas / default_replicas
+    adjustment = max(0.5, min(2.0, ratio))
+
+    # Grace period: don't tighten while autoscaler is actively scaling
+    if context.autoscaler and context.autoscaler.actively_scaling and adjustment > 1.0:
+        return profile
+
+    refined = profile.model_copy(deep=True)
+    inv_adjustment = 1.0 / adjustment
+
+    refined.stressed.persistence_latency_p99_max_ms *= inv_adjustment
+    refined.stressed.history_backlog_age_stress_sec *= inv_adjustment
+    refined.healthy.history_backlog_age_healthy_sec *= inv_adjustment
+
+    # If refinement breaks ordering, fall back to original
+    try:
+        from .config import _validate_threshold_ordering
+
+        _validate_threshold_ordering(refined)
+    except ValueError:
+        return profile
+
+    return refined
+
+
+# =============================================================================
+# HEALTH STATE EVALUATION
+# =============================================================================
 
 
 def evaluate_health_state(
@@ -53,67 +189,96 @@ def evaluate_health_state(
     healthy: HealthyThresholds | None = None,
     *,
     consecutive_critical_count: int = 0,
-) -> tuple[HealthState, int]:
+    current_scale_band: ScaleBand | None = None,
+    deployment_context: DeploymentContext | None = None,
+    overrides: ThresholdOverrides | None = None,
+) -> tuple[HealthState, int, ScaleBand]:
     """Evaluate health state from signals using deterministic rules.
 
     This function is the core of the Health State Machine.
     It uses ONLY deterministic rules - NO LLM involvement.
 
+    When explicit threshold objects are NOT provided, the function
+    classifies throughput into a scale band and uses the corresponding
+    threshold profile. When explicit thresholds ARE provided, they
+    take precedence (backward compatibility).
+
     Args:
         primary: Forward progress indicators (12 signals)
         current_state: Current health state (for transition validation)
-        critical: Thresholds for CRITICAL state
-        stressed: Thresholds for STRESSED state
-        healthy: Thresholds for HAPPY state
-        consecutive_critical_count: How many consecutive evaluations have
-            triggered critical gates. Caller must track and pass this in.
+        critical: Explicit thresholds for CRITICAL state (backward compat)
+        stressed: Explicit thresholds for STRESSED state (backward compat)
+        healthy: Explicit thresholds for HAPPY state (backward compat)
+        consecutive_critical_count: Debounce counter for Critical transitions.
+        current_scale_band: Band from previous evaluation (for hysteresis).
+        deployment_context: Runtime deployment state (for threshold refinement).
+        overrides: Per-threshold overrides from operator config.
 
     Returns:
-        Tuple of (new health state, updated consecutive critical count).
-        The caller must persist the count for the next evaluation.
+        Tuple of (new health state, updated consecutive critical count, scale band).
     """
-    if critical is None:
-        critical = CriticalThresholds()
-    if stressed is None:
-        stressed = StressedThresholds()
-    if healthy is None:
-        healthy = HealthyThresholds()
+    # Always classify scale band (even when explicit thresholds provided)
+    new_scale_band = classify_scale_band(
+        primary.state_transitions.throughput_per_sec,
+        current_scale_band,
+    )
+
+    # Use explicit thresholds if provided (backward compat), else scale-band profile
+    if critical is None and stressed is None and healthy is None:
+        profile = get_threshold_profile(new_scale_band, overrides=overrides)
+        if deployment_context is not None:
+            profile = refine_thresholds(profile, deployment_context)
+        critical = profile.critical
+        stressed = profile.stressed
+        healthy = profile.healthy
+    else:
+        if critical is None:
+            critical = CriticalThresholds()
+        if stressed is None:
+            stressed = StressedThresholds()
+        if healthy is None:
+            healthy = HealthyThresholds()
 
     # Idle cluster detection: zero throughput with zero errors/backlog
     # means no work is being submitted — not that something is broken.
     if _is_idle(primary):
-        return HealthState.HAPPY, 0
+        return HealthState.HAPPY, 0, new_scale_band
 
     # Check CRITICAL gates first (any one triggers)
     if _is_critical(primary, critical):
         new_count = consecutive_critical_count + 1
 
         if new_count >= CONSECUTIVE_CRITICAL_THRESHOLD:
-            # Sustained critical — transition (with invariant applied)
-            return _apply_transition_invariant(current_state, HealthState.CRITICAL), new_count
+            return (
+                _apply_transition_invariant(current_state, HealthState.CRITICAL),
+                new_count,
+                new_scale_band,
+            )
 
-        # Not yet sustained — report STRESSED as early warning, carry the count
-        return _apply_transition_invariant(current_state, HealthState.STRESSED), new_count
+        return (
+            _apply_transition_invariant(current_state, HealthState.STRESSED),
+            new_count,
+            new_scale_band,
+        )
 
     # Critical gates not triggered — reset the counter
     new_count = 0
 
     # Recovery hysteresis: when currently CRITICAL, require signals to be
     # clearly better than the stressed threshold before recovering.
-    # This prevents flapping at the Critical/Stressed boundary.
     if current_state == HealthState.CRITICAL and _is_near_critical(primary, critical):
-        return HealthState.STRESSED, new_count
+        return HealthState.STRESSED, new_count, new_scale_band
 
     # Check STRESSED gates (trending wrong)
     if _is_stressed(primary, stressed):
-        return HealthState.STRESSED, new_count
+        return HealthState.STRESSED, new_count, new_scale_band
 
     # Check HAPPY gates (all must pass)
     if _is_healthy(primary, healthy):
-        return HealthState.HAPPY, new_count
+        return HealthState.HAPPY, new_count, new_scale_band
 
     # Default to STRESSED if between thresholds
-    return HealthState.STRESSED, new_count
+    return HealthState.STRESSED, new_count, new_scale_band
 
 
 def _is_idle(primary: PrimarySignals) -> bool:
@@ -308,6 +473,8 @@ WORKER_SLOTS_STRESSED_PCT = 0.1  # < 10% available = stressed
 def classify_bottleneck(
     primary: PrimarySignals,
     worker: WorkerSignals,
+    *,
+    scale_band: ScaleBand | None = None,
 ) -> BottleneckClassification:
     """Classify whether bottleneck is server-side or worker-side.
 
@@ -319,7 +486,14 @@ def classify_bottleneck(
     - MIXED: Both need attention
     - HEALTHY: Neither constrained
     """
-    server_stressed = _is_server_stressed(primary)
+    band = scale_band or classify_scale_band(primary.state_transitions.throughput_per_sec)
+    profile = get_threshold_profile(band)
+
+    server_stressed = _is_server_stressed(
+        primary,
+        persistence_latency_p95_threshold=profile.stressed.persistence_latency_p99_max_ms,
+        backlog_age_threshold=profile.stressed.history_backlog_age_stress_sec,
+    )
     worker_stressed = _is_worker_stressed(worker)
 
     if server_stressed and worker_stressed:
@@ -332,9 +506,17 @@ def classify_bottleneck(
         return BottleneckClassification.HEALTHY
 
 
-def _is_server_stressed(primary: PrimarySignals) -> bool:
-    """Check if server is the bottleneck."""
-    return primary.history.backlog_age_sec > 30.0 or primary.persistence.latency_p95_ms > 100.0
+def _is_server_stressed(
+    primary: PrimarySignals,
+    *,
+    persistence_latency_p95_threshold: float = 100.0,
+    backlog_age_threshold: float = 30.0,
+) -> bool:
+    """Check if server is the bottleneck. Scale-aware thresholds."""
+    return (
+        primary.history.backlog_age_sec > backlog_age_threshold
+        or primary.persistence.latency_p95_ms > persistence_latency_p95_threshold
+    )
 
 
 def _is_worker_stressed(worker: WorkerSignals) -> bool:

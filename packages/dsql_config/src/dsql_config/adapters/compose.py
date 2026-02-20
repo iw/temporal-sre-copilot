@@ -1,7 +1,16 @@
 """Docker Compose platform adapter — renders per-service environment variable maps."""
 
+from copilot_core.deployment import (
+    AutoscalerType,
+    DeploymentProfile,
+    ResourceIdentity,
+    ScalingTopology,
+    ServiceResourceLimits,
+    ServiceScalingBounds,
+)
 from dsql_config.adapters.ecs import _DSQL_ENV_MAP
 from dsql_config.models import ConfigProfile, RenderedSnippet
+from dsql_config.presets import PRESETS
 
 
 class ComposeAdapter:
@@ -49,3 +58,52 @@ class ComposeAdapter:
                 lines.append(f"{env_name}={value}")
 
         return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Deployment adapter — produces DeploymentProfile for Compose deployments
+# ---------------------------------------------------------------------------
+
+
+class ComposeDeploymentAdapter:
+    platform: str = "compose"
+    name: str = "compose-deployment"
+
+    def render_deployment(
+        self,
+        profile: ConfigProfile,
+        annotations: dict[str, str],
+    ) -> DeploymentProfile:
+        def _fixed_bounds(service: str) -> ServiceScalingBounds:
+            cpu = annotations.get(f"{service}_cpu_limit")
+            mem = annotations.get(f"{service}_memory_limit")
+            return ServiceScalingBounds(
+                min_replicas=1,
+                max_replicas=1,
+                resource_limits=ServiceResourceLimits(
+                    cpu_millicores=int(cpu) if cpu else None,
+                    memory_mib=int(mem) if mem else None,
+                ),
+            )
+
+        preset = PRESETS.get(profile.preset_name)
+        throughput_min = preset.throughput_range.min_st_per_sec if preset else 0.0
+        throughput_max = preset.throughput_range.max_st_per_sec if preset else None
+
+        return DeploymentProfile(
+            preset_name=profile.preset_name,
+            throughput_range_min=throughput_min,
+            throughput_range_max=throughput_max,
+            scaling_topology=ScalingTopology(
+                history=_fixed_bounds("history"),
+                matching=_fixed_bounds("matching"),
+                frontend=_fixed_bounds("frontend"),
+                worker=_fixed_bounds("worker"),
+                autoscaler_type=AutoscalerType.FIXED,
+            ),
+            resource_identity=ResourceIdentity(
+                dsql_endpoint=annotations["dsql_endpoint"],
+                platform_identifier=annotations.get("compose_project_name", "temporal-sre-copilot"),
+                platform_type="compose",
+            ),
+        )

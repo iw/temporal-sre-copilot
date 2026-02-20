@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from copilot_core.deployment import DeploymentContext, DeploymentProfile  # noqa: TC001
 from copilot_core.models import MetricAggregate, ServiceMetrics  # noqa: TC001
 from copilot_core.types import ParameterClassification  # noqa: TC001
 from copilot_core.versions import VersionType  # noqa: TC001
@@ -61,6 +62,7 @@ class ConfigSnapshot(BaseModel):
     worker_options: WorkerOptionsSnapshot
     dsql_plugin_config: DSQLPluginSnapshot
     config_profile: ConfigProfile | None = None
+    deployment_profile: DeploymentProfile | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +149,7 @@ class BehaviourProfile(BaseModel):
 
     created_at: str
     is_baseline: bool = False
+    deployment_context: DeploymentContext | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -208,9 +211,19 @@ class VersionDiff(BaseModel):
     new_version: VersionType | None
 
 
+class DeploymentDiff(BaseModel):
+    """Diff for a single deployment topology field."""
+
+    service: str
+    field: str
+    old_value: int | float | str | bool | None
+    new_value: int | float | str | bool | None
+
+
 class ProfileComparison(BaseModel):
     profile_a_id: str
     profile_b_id: str
     config_diffs: list[ConfigDiff]
     telemetry_diffs: list[TelemetryDiff]
     version_diffs: list[VersionDiff]
+    deployment_diffs: list[DeploymentDiff] = []

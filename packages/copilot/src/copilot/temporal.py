@@ -18,6 +18,7 @@ from temporalio.worker.workflow_sandbox import SandboxedWorkflowRunner
 
 from copilot.activities import (
     check_recent_assessment,
+    fetch_deployment_context,
     fetch_rag_context,
     fetch_recent_log_patterns,
     fetch_signal_history,
@@ -51,6 +52,8 @@ COPILOT_WORKFLOWS = [
 COPILOT_ACTIVITIES = [
     # AMP activities
     fetch_signals_from_amp,
+    # Inspect activities
+    fetch_deployment_context,
     # Loki activities
     query_loki_errors,
     fetch_recent_log_patterns,

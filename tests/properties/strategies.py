@@ -23,6 +23,7 @@ from copilot.models import (
     PrimarySignals,
     QueueAmplifiers,
     RuntimeAmplifiers,
+    ScaleBand,
     ShardAmplifiers,
     StateTransitionSignals,
     ThrottlingAmplifiers,
@@ -206,4 +207,109 @@ def worker_signals(draw):
         activity_slots_used=draw(st.integers(min_value=0, max_value=500)),
         workflow_pollers=draw(st.integers(min_value=0, max_value=100)),
         activity_pollers=draw(st.integers(min_value=0, max_value=100)),
+    )
+
+
+# =============================================================================
+# SCALE BAND AND DEPLOYMENT STRATEGIES
+# =============================================================================
+
+scale_bands = st.sampled_from(list(ScaleBand))
+
+
+@st.composite
+def service_replica_state(draw):
+    from copilot_core.deployment import ServiceReplicaState
+
+    desired = draw(st.integers(min_value=1, max_value=20))
+    running = draw(st.integers(min_value=0, max_value=desired))
+    pending = desired - running
+    return ServiceReplicaState(
+        running=running,
+        desired=desired,
+        pending=pending,
+        cpu_utilization_pct=draw(
+            st.one_of(st.none(), st.floats(min_value=0, max_value=100, allow_nan=False))
+        ),
+        memory_utilization_pct=draw(
+            st.one_of(st.none(), st.floats(min_value=0, max_value=100, allow_nan=False))
+        ),
+    )
+
+
+@st.composite
+def autoscaler_state(draw):
+    from copilot_core.deployment import AutoscalerState
+
+    min_cap = draw(st.integers(min_value=1, max_value=10))
+    max_cap = draw(st.integers(min_value=min_cap, max_value=20))
+    desired = draw(st.integers(min_value=min_cap, max_value=max_cap))
+    return AutoscalerState(
+        min_capacity=min_cap,
+        max_capacity=max_cap,
+        desired_capacity=desired,
+        actively_scaling=draw(st.booleans()),
+    )
+
+
+@st.composite
+def dsql_connection_state(draw):
+    from copilot_core.deployment import DSQLConnectionState
+
+    max_conns = draw(st.integers(min_value=100, max_value=10000))
+    current = draw(st.integers(min_value=0, max_value=max_conns))
+    return DSQLConnectionState(
+        current_connections=current,
+        max_connections=max_conns,
+    )
+
+
+@st.composite
+def deployment_context(draw):
+    from copilot_core.deployment import DeploymentContext
+
+    return DeploymentContext(
+        history=draw(service_replica_state()),
+        matching=draw(service_replica_state()),
+        frontend=draw(service_replica_state()),
+        worker=draw(service_replica_state()),
+        autoscaler=draw(st.one_of(st.none(), autoscaler_state())),
+        dsql=draw(st.one_of(st.none(), dsql_connection_state())),
+        timestamp="2026-02-20T10:00:00Z",
+    )
+
+
+@st.composite
+def deployment_profile(draw):
+    from copilot_core.deployment import (
+        AutoscalerType,
+        DeploymentProfile,
+        ScalingTopology,
+        ServiceScalingBounds,
+    )
+
+    band = draw(scale_bands)
+    ranges = {
+        ScaleBand.STARTER: (0.0, 50.0),
+        ScaleBand.MID_SCALE: (50.0, 500.0),
+        ScaleBand.HIGH_THROUGHPUT: (500.0, None),
+    }
+    min_t, max_t = ranges[band]
+
+    def _bounds(draw):
+        min_r = draw(st.integers(min_value=1, max_value=5))
+        max_r = draw(st.integers(min_value=min_r, max_value=20))
+        return ServiceScalingBounds(min_replicas=min_r, max_replicas=max_r)
+
+    return DeploymentProfile(
+        preset_name=band.value,
+        throughput_range_min=min_t,
+        throughput_range_max=max_t,
+        scaling_topology=ScalingTopology(
+            history=_bounds(draw),
+            matching=_bounds(draw),
+            frontend=_bounds(draw),
+            worker=_bounds(draw),
+            autoscaler_type=draw(st.sampled_from(list(AutoscalerType))),
+        ),
     )

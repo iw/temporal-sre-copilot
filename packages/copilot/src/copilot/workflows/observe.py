@@ -19,20 +19,25 @@ with workflow.unsafe.imports_passed_through():
     from whenever import TimeDelta
 
     from copilot.activities import (
+        fetch_deployment_context,
         fetch_signals_from_amp,
         get_latest_assessment,
         store_signals_snapshot,
     )
+    from copilot.activities.inspect import FetchDeploymentContextInput
     from copilot.models import (
         AssessHealthInput,
         FetchSignalsInput,
         GetLatestAssessmentInput,
         HealthState,
         ObserveClusterInput,
+        ScaleBand,
         Signals,
         StoreSignalsInput,
+        ThresholdOverrides,
     )
     from copilot.models.state_machine import evaluate_health_state
+    from copilot_core.deployment import DeploymentContext, ResourceIdentity
 
 
 @workflow.defn
@@ -55,19 +60,43 @@ class ObserveClusterWorkflow:
         self._signal_window: list[Signals] = []
         self._window_size = 10  # Keep last 10 signal snapshots (5 minutes)
         self._consecutive_critical_count = 0  # Debounce counter for Critical transitions
+        self._current_scale_band: ScaleBand | None = None
+        self._deployment_context: DeploymentContext | None = None
+        self._cycles_since_context_fetch = 0
+        self._context_fetch_interval = 10  # Every 10 cycles = 5 minutes
 
     @workflow.run
     async def run(self, input: ObserveClusterInput) -> None:
         """Run the observation loop."""
         workflow.logger.info("ObserveClusterWorkflow started")
 
+        # Parse optional resource identity and threshold overrides from input
+        resource_identity: ResourceIdentity | None = None
+        if input.resource_identity_json:
+            resource_identity = ResourceIdentity.model_validate_json(input.resource_identity_json)
+
+        overrides: ThresholdOverrides | None = None
+        if input.threshold_overrides_json:
+            overrides = ThresholdOverrides.model_validate_json(input.threshold_overrides_json)
+
         # Reconcile with stored state before entering the loop.
-        # This catches the case where a code deploy changes health
-        # evaluation logic and the stored assessment is now stale.
         await self._reconcile_stored_state(input.dsql_endpoint)
 
         while True:
             try:
+                # Fetch deployment context every N cycles
+                should_fetch = (
+                    resource_identity
+                    and self._cycles_since_context_fetch >= self._context_fetch_interval
+                )
+                if should_fetch:
+                    self._deployment_context = await workflow.execute_activity(
+                        fetch_deployment_context,
+                        FetchDeploymentContextInput(resource_identity=resource_identity),
+                        start_to_close_timeout=TimeDelta(seconds=30).py_timedelta(),
+                    )
+                    self._cycles_since_context_fetch = 0
+
                 # Fetch current signals from AMP
                 signals = await workflow.execute_activity(
                     fetch_signals_from_amp,
@@ -91,10 +120,15 @@ class ObserveClusterWorkflow:
                     self._signal_window.pop(0)
 
                 # DETERMINISTIC: Evaluate health state (no LLM)
-                new_state, self._consecutive_critical_count = evaluate_health_state(
-                    signals.primary,
-                    self._current_state,
-                    consecutive_critical_count=self._consecutive_critical_count,
+                new_state, self._consecutive_critical_count, self._current_scale_band = (
+                    evaluate_health_state(
+                        signals.primary,
+                        self._current_state,
+                        consecutive_critical_count=self._consecutive_critical_count,
+                        current_scale_band=self._current_scale_band,
+                        deployment_context=self._deployment_context,
+                        overrides=overrides,
+                    )
                 )
 
                 # Trigger assessment if state changed
@@ -117,6 +151,8 @@ class ObserveClusterWorkflow:
                     )
 
                     self._current_state = new_state
+
+                self._cycles_since_context_fetch += 1
 
             except Exception as e:
                 workflow.logger.error(f"Error in observation loop: {e}")
@@ -160,3 +196,17 @@ class ObserveClusterWorkflow:
     def signal_window_size(self) -> int:
         """Query the current signal window size."""
         return len(self._signal_window)
+
+    @workflow.query
+    def deployment_context(self) -> str | None:
+        """Query the cached deployment context as JSON."""
+        if self._deployment_context is None:
+            return None
+        return self._deployment_context.model_dump_json()
+
+    @workflow.query
+    def current_scale_band(self) -> str | None:
+        """Query the current scale band."""
+        if self._current_scale_band is None:
+            return None
+        return self._current_scale_band.value

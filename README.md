@@ -143,6 +143,26 @@ Health is derived from a structured signal taxonomy, not arbitrary thresholds:
 
 Only primary signals decide state. Amplifiers provide context for the LLM's explanation. High latency alone ≠ Critical; high latency WITH impaired progress = Critical.
 
+### Scale-aware thresholds
+
+A 2 wf/s dev cluster and a 500 wf/s production cluster have very different "normal". The Copilot classifies observed throughput into scale bands and selects a matching threshold profile — no manual tuning required.
+
+| Scale Band | Throughput | Persistence p99 gate | State transitions healthy | Poller timeout rate |
+|------------|-----------|----------------------|--------------------------|---------------------|
+| Starter | < 50 st/s | 500 ms | 0.5 st/s | 0.50 |
+| Mid-scale | 50–500 st/s | 200 ms | 10 st/s | 0.20 |
+| High-throughput | > 500 st/s | 100 ms | 50 st/s | 0.10 |
+
+Band transitions use 10% hysteresis to prevent flapping at boundaries (e.g. oscillating around 50 st/s won't flip between Starter and Mid-scale).
+
+Three layers build on each other:
+
+1. **Scale-aware thresholds** — `ScaleBand` classification + `ThresholdProfile` per band. Eliminates the dead zone where low-throughput clusters were incorrectly flagged as Stressed.
+2. **Deployment profiles** — `DeploymentProfile` captures what was deployed (scaling topology, resource identity). Deployment adapters (ECS, Compose) render profiles from config compiler output.
+3. **Dynamic inspection** — `PlatformInspector` queries the live cluster (ECS DescribeServices, CloudWatch, Docker API) for runtime state. `refine_thresholds()` adjusts thresholds based on actual vs expected capacity — more History replicas tightens latency gates, fewer loosens them.
+
+Operators can override any threshold via `ThresholdOverrides` in `CopilotConfig` without touching the profile system.
+
 ### Multi-agent architecture
 
 Two Pydantic AI agents handle explanation:
@@ -336,7 +356,7 @@ temporal-sre-copilot/
 │   ├── behaviour_profiles/         # profile store + API
 │   └── copilot/                    # orchestrator (depends on all three)
 ├── dev/                            # standalone dev environment (Docker Compose)
-├── tests/                          # shared test directory (156 tests, ~10s)
+├── tests/                          # shared test directory (193 tests, ~10s)
 │   └── properties/                 # Hypothesis property-based tests
 ├── terraform/                      # modular infrastructure
 ├── grafana/                        # dashboards
@@ -372,13 +392,13 @@ dsql_config  behaviour_profiles  │
 ## Tests
 
 ```bash
-just test              # 156 tests, ~10s
+just test              # 193 tests, ~10s
 just lint              # ruff check + format
 just typing            # ty check
 just check-all         # all three
 ```
 
-Property-based tests (Hypothesis) validate state machine invariants, config compiler derivation completeness, serialization round-trips, guard rail coverage, adapter output completeness, profile comparison ordering, drift detection, and preset conformance.
+Property-based tests (Hypothesis) validate state machine invariants, scale band classification purity, threshold ordering across all bands, dead zone elimination, config compiler derivation completeness, serialization round-trips, guard rail coverage, adapter output completeness, profile comparison ordering, drift detection, preset conformance, and deployment model backward compatibility.
 
 ## Related
 
@@ -387,6 +407,7 @@ Property-based tests (Hypothesis) validate state machine invariants, config comp
 - [Behaviour Profiles docs](docs/behaviour-profiles.md)
 - [Spec: Copilot](.kiro/specs/temporal-sre-copilot/) — Requirements, design, tasks
 - [Spec: Enhanced Config UX](.kiro/specs/enhance-config-ux/) — Requirements, design, tasks
+- [Spec: Scale-Aware Thresholds](.kiro/specs/scale-aware-thresholds/) — Requirements, design, tasks
 
 ## License
 

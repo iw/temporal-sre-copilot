@@ -22,6 +22,10 @@ python = "dsql_config.adapters.python_sdk:PythonSDKAdapter"
 ecs = "dsql_config.adapters.ecs:ECSAdapter"
 compose = "dsql_config.adapters.compose:ComposeAdapter"
 
+[project.entry-points."temporal_dsql.deployment_adapters"]
+ecs = "dsql_config.adapters.ecs:ECSDeploymentAdapter"
+compose = "dsql_config.adapters.compose:ComposeDeploymentAdapter"
+
 [build-system]
 requires = ["uv_build>=0.9.28,<0.10.0"]
 build-backend = "uv_build"

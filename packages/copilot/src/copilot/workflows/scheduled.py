@@ -71,7 +71,7 @@ class ScheduledAssessmentWorkflow:
                     # Only primary signals decide state — amplifiers explain WHY later
                     # Scheduled assessments use count=0 since they don't track
                     # consecutive observations (that's ObserveClusterWorkflow's job)
-                    health_state, _ = evaluate_health_state(
+                    health_state, _, _ = evaluate_health_state(
                         signals.primary,
                         HealthState.HAPPY,  # Default for scheduled
                     )

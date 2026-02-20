@@ -42,9 +42,13 @@ def _healthy_signals():
 
 
 def _critical_throughput_signals():
-    """Throughput collapsed but everything else fine."""
+    """Throughput collapsed but everything else fine.
+
+    throughput_per_sec=0.1 is below even the STARTER critical floor (0.5 st/sec),
+    so this is unambiguously critical across all scale bands.
+    """
     return PrimarySignals(
-        state_transitions={"throughput_per_sec": 1, "latency_p95_ms": 10, "latency_p99_ms": 20},
+        state_transitions={"throughput_per_sec": 0.1, "latency_p95_ms": 10, "latency_p99_ms": 20},
         workflow_completion={"completion_rate": 0.99, "success_per_sec": 100, "failed_per_sec": 0},
         history={
             "backlog_age_sec": 1,
@@ -91,7 +95,7 @@ def _idle_signals():
 @settings(max_examples=500)
 def test_no_direct_happy_to_critical(signals: PrimarySignals):
     """Starting from HAPPY, never returns CRITICAL directly."""
-    result, _ = evaluate_health_state(signals, HealthState.HAPPY)
+    result, _, _ = evaluate_health_state(signals, HealthState.HAPPY)
     assert result != HealthState.CRITICAL
 
 
@@ -99,7 +103,7 @@ def test_no_direct_happy_to_critical(signals: PrimarySignals):
 @settings(max_examples=500)
 def test_no_direct_happy_to_critical_even_with_sustained(signals: PrimarySignals):
     """Even with max consecutive critical count, HAPPY never goes to CRITICAL."""
-    result, _ = evaluate_health_state(
+    result, _, _ = evaluate_health_state(
         signals,
         HealthState.HAPPY,
         consecutive_critical_count=CONSECUTIVE_CRITICAL_THRESHOLD + 10,
@@ -111,7 +115,7 @@ def test_no_direct_happy_to_critical_even_with_sustained(signals: PrimarySignals
 @settings(max_examples=500)
 def test_stressed_can_reach_critical(signals: PrimarySignals):
     """From STRESSED with sustained critical, all three states are reachable."""
-    result, _ = evaluate_health_state(
+    result, _, _ = evaluate_health_state(
         signals,
         HealthState.STRESSED,
         consecutive_critical_count=CONSECUTIVE_CRITICAL_THRESHOLD,
@@ -123,7 +127,7 @@ def test_stressed_can_reach_critical(signals: PrimarySignals):
 @settings(max_examples=500)
 def test_critical_can_recover(signals: PrimarySignals):
     """From CRITICAL, all three states are reachable."""
-    result, _ = evaluate_health_state(signals, HealthState.CRITICAL)
+    result, _, _ = evaluate_health_state(signals, HealthState.CRITICAL)
     assert result in (HealthState.HAPPY, HealthState.STRESSED, HealthState.CRITICAL)
 
 
@@ -143,7 +147,7 @@ def test_deterministic(signals: PrimarySignals, current_state: HealthState):
 @settings(max_examples=500)
 def test_output_is_valid_health_state(signals: PrimarySignals, current_state: HealthState):
     """Output is always a valid HealthState + non-negative count."""
-    result, count = evaluate_health_state(signals, current_state)
+    result, count, band = evaluate_health_state(signals, current_state)
     assert result in HealthState
     assert count >= 0
 
@@ -155,7 +159,7 @@ def test_output_is_valid_health_state(signals: PrimarySignals, current_state: He
 @settings(max_examples=100)
 def test_healthy_signals_produce_happy(current_state: HealthState):
     """Clearly healthy signals always produce HAPPY."""
-    result, count = evaluate_health_state(_healthy_signals(), current_state)
+    result, count, _ = evaluate_health_state(_healthy_signals(), current_state)
     assert result == HealthState.HAPPY
     assert count == 0
 
@@ -182,7 +186,7 @@ def test_collapsed_throughput_not_happy(current_state: HealthState):
             "retry_rate_per_sec": 0,
         },
     )
-    result, _ = evaluate_health_state(collapsed, current_state)
+    result, _, _ = evaluate_health_state(collapsed, current_state)
     assert result != HealthState.HAPPY
 
 
@@ -208,7 +212,7 @@ def test_critical_backlog_not_happy(current_state: HealthState):
             "retry_rate_per_sec": 0,
         },
     )
-    result, _ = evaluate_health_state(signals, current_state)
+    result, _, _ = evaluate_health_state(signals, current_state)
     assert result != HealthState.HAPPY
 
 
@@ -234,7 +238,7 @@ def test_threshold_ordering():
 @settings(max_examples=100)
 def test_idle_cluster_is_happy(current_state: HealthState):
     """Idle cluster (zero everything) is HAPPY, not CRITICAL."""
-    result, count = evaluate_health_state(_idle_signals(), current_state)
+    result, count, _ = evaluate_health_state(_idle_signals(), current_state)
     assert result == HealthState.HAPPY
     assert count == 0
 
@@ -313,7 +317,7 @@ def test_idle_detection_near_zero_noise():
 
 def test_single_critical_observation_stays_stressed():
     """A single critical observation from STRESSED stays STRESSED (debounce)."""
-    result, count = evaluate_health_state(
+    result, count, _ = evaluate_health_state(
         _critical_throughput_signals(),
         HealthState.STRESSED,
         consecutive_critical_count=0,
@@ -327,7 +331,7 @@ def test_sustained_critical_triggers_critical():
     count = 0
     state = HealthState.STRESSED
     for _ in range(CONSECUTIVE_CRITICAL_THRESHOLD):
-        state, count = evaluate_health_state(
+        state, count, _ = evaluate_health_state(
             _critical_throughput_signals(),
             state,
             consecutive_critical_count=count,
@@ -338,12 +342,12 @@ def test_sustained_critical_triggers_critical():
 def test_transient_spike_resets_counter():
     """A good observation between bad ones resets the critical counter."""
     state = HealthState.STRESSED
-    state, count = evaluate_health_state(
+    state, count, _ = evaluate_health_state(
         _critical_throughput_signals(),
         state,
         consecutive_critical_count=0,
     )
-    state, count = evaluate_health_state(
+    state, count, _ = evaluate_health_state(
         _critical_throughput_signals(),
         state,
         consecutive_critical_count=count,
@@ -351,7 +355,7 @@ def test_transient_spike_resets_counter():
     assert count == 2
 
     # One good observation resets
-    state, count = evaluate_health_state(
+    state, count, _ = evaluate_health_state(
         _healthy_signals(),
         state,
         consecutive_critical_count=count,
@@ -382,7 +386,7 @@ def test_low_completion_rate_during_ramp_up_not_critical():
             "retry_rate_per_sec": 0,
         },
     )
-    result, _ = evaluate_health_state(
+    result, _, _ = evaluate_health_state(
         ramp_up,
         HealthState.STRESSED,
         consecutive_critical_count=CONSECUTIVE_CRITICAL_THRESHOLD,

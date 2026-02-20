@@ -33,6 +33,14 @@ class ObserveClusterInput(BaseModel):
 
     prometheus_endpoint: str = Field(description="Prometheus-compatible query endpoint URL")
     dsql_endpoint: str = Field(description="DSQL cluster endpoint for state storage")
+    resource_identity_json: str | None = Field(
+        default=None,
+        description="Serialized ResourceIdentity JSON for deployment context inspection",
+    )
+    threshold_overrides_json: str | None = Field(
+        default=None,
+        description="Serialized ThresholdOverrides JSON for per-threshold tuning",
+    )
 
 
 class LogWatcherInput(BaseModel):

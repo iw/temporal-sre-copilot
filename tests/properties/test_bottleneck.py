@@ -129,7 +129,7 @@ def test_both_stressed_is_mixed():
         state_transitions={"throughput_per_sec": 200, "latency_p95_ms": 10, "latency_p99_ms": 20},
         workflow_completion={"completion_rate": 0.99, "success_per_sec": 100, "failed_per_sec": 0},
         history={
-            "backlog_age_sec": 60,
+            "backlog_age_sec": 61,
             "task_processing_rate_per_sec": 200,
             "shard_churn_rate_per_sec": 0,
         },

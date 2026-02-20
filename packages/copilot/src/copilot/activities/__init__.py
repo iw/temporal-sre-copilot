@@ -8,6 +8,7 @@ Activities perform I/O operations:
 """
 
 from .amp import fetch_signals_from_amp, fetch_worker_signals_from_amp
+from .inspect import FetchDeploymentContextInput, fetch_deployment_context
 from .loki import fetch_recent_log_patterns, query_loki_errors
 from .rag import fetch_rag_context
 from .state_store import (
@@ -23,6 +24,9 @@ __all__ = [
     # AMP
     "fetch_signals_from_amp",
     "fetch_worker_signals_from_amp",
+    # Inspect
+    "fetch_deployment_context",
+    "FetchDeploymentContextInput",
     # Loki
     "query_loki_errors",
     "fetch_recent_log_patterns",

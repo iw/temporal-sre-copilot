@@ -197,3 +197,121 @@ async def test_signals_survive_sandbox_round_trip():
                 task_queue=task_queue,
             )
             assert result == "ok"
+
+
+# ---------------------------------------------------------------------------
+# Scale-aware threshold workflow integration tests
+# ---------------------------------------------------------------------------
+
+with workflow.unsafe.imports_passed_through():
+    from copilot.activities.inspect import FetchDeploymentContextInput
+    from copilot.models import ObserveClusterInput, ThresholdOverrides
+    from copilot_core.deployment import DeploymentContext, ResourceIdentity, ServiceReplicaState
+
+
+@activity.defn(name="fetch_deployment_context")
+async def fake_fetch_deployment_context(
+    input: FetchDeploymentContextInput,
+) -> DeploymentContext | None:
+    """Return a canned DeploymentContext."""
+    return DeploymentContext(
+        history=ServiceReplicaState(running=2, desired=2),
+        matching=ServiceReplicaState(running=1, desired=1),
+        frontend=ServiceReplicaState(running=1, desired=1),
+        worker=ServiceReplicaState(running=1, desired=1),
+        timestamp=Instant.now().format_iso(),
+    )
+
+
+async def test_observe_cluster_input_with_scale_fields():
+    """ObserveClusterInput with resource_identity and threshold_overrides
+    serializes through Temporal."""
+    identity = ResourceIdentity(
+        dsql_endpoint="test.dsql.eu-west-1.on.aws",
+        platform_identifier="temporal-dev",
+        platform_type="compose",
+    )
+    overrides = ThresholdOverrides(persistence_latency_p99_max_ms=300.0)
+
+    original = ObserveClusterInput(
+        prometheus_endpoint="http://mimir:9009/prometheus",
+        dsql_endpoint="test.dsql.eu-west-1.on.aws",
+        resource_identity_json=identity.model_dump_json(),
+        threshold_overrides_json=overrides.model_dump_json(),
+    )
+
+    from pydantic import TypeAdapter
+    from pydantic_core import to_json
+
+    json_bytes = to_json(original)
+    restored = TypeAdapter(ObserveClusterInput).validate_json(json_bytes)
+    assert restored.resource_identity_json is not None
+    assert restored.threshold_overrides_json is not None
+
+    # Verify the JSON can be parsed back into the models
+    ri = ResourceIdentity.model_validate_json(restored.resource_identity_json)
+    assert ri.platform_type == "compose"
+    ov = ThresholdOverrides.model_validate_json(restored.threshold_overrides_json)
+    assert ov.persistence_latency_p99_max_ms == 300.0
+
+
+async def test_fetch_deployment_context_input_serializes():
+    """FetchDeploymentContextInput survives the Temporal data converter."""
+    from pydantic import TypeAdapter
+    from pydantic_core import to_json
+
+    identity = ResourceIdentity(
+        dsql_endpoint="test.dsql.eu-west-1.on.aws",
+        platform_identifier="temporal-dev",
+        platform_type="compose",
+    )
+    original = FetchDeploymentContextInput(resource_identity=identity)
+    json_bytes = to_json(original)
+    restored = TypeAdapter(FetchDeploymentContextInput).validate_json(json_bytes)
+    assert restored.resource_identity.platform_type == "compose"
+
+
+@workflow.defn
+class DeploymentContextWorkflow:
+    """Test workflow that fetches deployment context from an activity."""
+
+    @workflow.run
+    async def run(self, dsql_endpoint: str) -> str:
+        ctx = await workflow.execute_activity(
+            fake_fetch_deployment_context,
+            FetchDeploymentContextInput(
+                resource_identity=ResourceIdentity(
+                    dsql_endpoint=dsql_endpoint,
+                    platform_identifier="test",
+                    platform_type="compose",
+                )
+            ),
+            start_to_close_timeout=timedelta(seconds=10),
+        )
+        assert ctx is not None
+        assert ctx.history.running == 2
+        return "ok"
+
+
+async def test_deployment_context_survives_sandbox():
+    """DeploymentContext returned from activity survives the workflow sandbox."""
+    async with await WorkflowEnvironment.start_local() as env:
+        client = await Client.connect(
+            env.client.service_client.config.target_host,
+            plugins=[PydanticAIPlugin()],
+        )
+        task_queue = f"test-ctx-{uuid.uuid4()}"
+
+        async with Worker(
+            client,
+            task_queue=task_queue,
+            workflows=[DeploymentContextWorkflow],
+            activities=[fake_fetch_deployment_context],
+        ):
+            result = await client.execute_workflow(
+                DeploymentContextWorkflow.run,
+                "test.dsql.eu-west-1.on.aws",
+                id=f"test-ctx-{uuid.uuid4()}",
+                task_queue=task_queue,
+            )
+            assert result == "ok"

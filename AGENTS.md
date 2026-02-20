@@ -20,10 +20,10 @@ dsql_config  behaviour_profiles  │
     └───────────┴───── copilot (orchestrator)
 ```
 
-- `copilot_core` — Shared foundation: `ParameterClassification`, `MetricAggregate`, `TelemetryBound`, `VersionType`, signal taxonomy
-- `dsql_config` — Config compiler, parameter registry, presets, guard rails, adapters, CLI
+- `copilot_core` — Shared foundation: `ParameterClassification`, `MetricAggregate`, `TelemetryBound`, `VersionType`, signal taxonomy, deployment models (`DeploymentProfile`, `DeploymentContext`, `ResourceIdentity`)
+- `dsql_config` — Config compiler, parameter registry, presets, guard rails, adapters (SDK, platform, deployment), CLI
 - `behaviour_profiles` — Profile models, storage (S3 + DSQL), telemetry collection (AMP), comparison, FastAPI router
-- `copilot` — Orchestrator: Temporal workflows, Pydantic AI agents, FastAPI app (mounts profile router), drift detection, conformance assessment
+- `copilot` — Orchestrator: Temporal workflows, Pydantic AI agents, FastAPI app (mounts profile router), platform inspectors (ECS, Compose), drift detection, conformance assessment
 
 **Critical constraint:** `dsql_config` does NOT depend on `behaviour_profiles`. They only share types through `copilot_core`.
 
@@ -58,6 +58,24 @@ Monitored Cluster (Temporal + DSQL)
 
 5. **Pydantic Models Everywhere** — Every workflow input and every activity input is a single Pydantic model. No bare positional args. This ensures Temporal's PydanticAIPlugin handles serialization correctly.
 
+### Scale-Aware Thresholds
+
+The Health State Machine uses scale-aware thresholds that adapt to cluster size. A 2 wf/s dev cluster and a 500 wf/s production cluster have different "normal" — the Copilot classifies observed throughput into scale bands and selects a matching threshold profile automatically.
+
+| Scale Band | Throughput | Persistence p99 | State transitions healthy | Poller timeout rate |
+|------------|-----------|-----------------|--------------------------|---------------------|
+| Starter | < 50 st/s | 500 ms | 0.5 st/s | 0.50 |
+| Mid-scale | 50–500 st/s | 200 ms | 10 st/s | 0.20 |
+| High-throughput | > 500 st/s | 100 ms | 50 st/s | 0.10 |
+
+Three layers:
+
+1. **Scale-aware thresholds** (`copilot/models/config.py`) — `ScaleBand` enum, `ThresholdProfile` per band, `ThresholdOverrides` for operator customization. Band transitions use 10% hysteresis to prevent flapping.
+2. **Deployment profiles** (`copilot_core/deployment.py`) — `DeploymentProfile` captures what was deployed (scaling topology, resource identity). `DeploymentAdapter` protocol (ECS, Compose) renders profiles from config compiler output. Registered via `temporal_dsql.deployment_adapters` entry points.
+3. **Dynamic inspection** (`copilot/inspectors/`) — `PlatformInspector` protocol queries the live cluster for runtime state. ECS inspector queries DescribeServices + CloudWatch (`AWS/AuroraDSQL` namespace). Compose inspector queries Docker Engine API. `refine_thresholds()` adjusts thresholds based on actual vs expected capacity. Registered via `temporal_copilot.platform_inspectors` entry points.
+
+`evaluate_health_state()` returns a 3-tuple: `(HealthState, consecutive_critical_count, ScaleBand)`. The `ObserveClusterWorkflow` fetches deployment context every 10 cycles (5 minutes) and caches it between fetches.
+
 ## Config Compiler Architecture
 
 The Config Compiler classifies every Temporal + DSQL parameter into SLO, Topology, Safety, or Tuning. Adopters only see SLO (required) and Topology (optional with defaults) — Safety and Tuning are auto-derived.
@@ -66,7 +84,7 @@ The Config Compiler classifies every Temporal + DSQL parameter into SLO, Topolog
 - **Scale Presets** (`dsql_config/presets.py`) — starter, mid-scale, high-throughput. Primary dimensions: state transitions/sec and workflow completion rates.
 - **Workload Modifiers** (`dsql_config/modifiers.py`) — simple-crud, orchestrator, batch-processor, long-running. Adjust preset defaults for specific workflow patterns.
 - **Guard Rails** (`dsql_config/guard_rails.py`) — Validation rules that prevent unsafe configurations. All errors/warnings reported before halting.
-- **Adapters** (`dsql_config/adapters/`) — Protocol-based with `importlib.metadata.entry_points()` discovery. SDK adapters (Go, Python) and platform adapters (ECS, Compose) are registered in `dsql_config`'s `pyproject.toml`.
+- **Adapters** (`dsql_config/adapters/`) — Protocol-based with `importlib.metadata.entry_points()` discovery. SDK adapters (Go, Python), platform adapters (ECS, Compose), and deployment adapters (ECS, Compose) are registered in `dsql_config`'s `pyproject.toml`.
 - **Explain** (`dsql_config/explain.py`) — Three levels of deterministic, template-based explanation. No LLM involvement. Uses registry metadata and compilation trace data.
 - **CLI** (`dsql_config/cli.py`) — Typer entry point: `temporal-dsql-config compile|list-presets|describe-preset|explain`
 
@@ -74,13 +92,13 @@ The Config Compiler classifies every Temporal + DSQL parameter into SLO, Topolog
 
 Profiles are stored in S3 (full JSON document) with metadata indexed in DSQL (for listing, filtering, baseline designation). This keeps DSQL row sizes small.
 
-- **Models** (`behaviour_profiles/models.py`) — BehaviourProfile, ConfigSnapshot, TelemetrySummary (throughput, latency, matching, DSQL pool, errors, resources), ProfileComparison, ConfigDiff, TelemetryDiff, VersionDiff
+- **Models** (`behaviour_profiles/models.py`) — BehaviourProfile, ConfigSnapshot, TelemetrySummary (throughput, latency, matching, DSQL pool, errors, resources), ProfileComparison, ConfigDiff, TelemetryDiff, VersionDiff, DeploymentDiff
 - **Storage** (`behaviour_profiles/storage.py`) — S3 for full profile JSON, DSQL for metadata queries
 - **Telemetry** (`behaviour_profiles/telemetry.py`) — Queries Amazon Managed Prometheus for curated metric aggregates (min, max, mean, p50, p95, p99)
 - **Comparison** (`behaviour_profiles/comparison.py`) — Config diff, telemetry diff (with configurable regression thresholds), version diff. Ordered by severity.
 - **API** (`behaviour_profiles/api.py`) — FastAPI router mounted by the copilot at `/profiles/*`
 
-The Copilot uses profiles for drift detection (compare current telemetry against baseline), drift correlation (config changes correlated with telemetry regressions), and preset conformance assessment (telemetry within expected bounds).
+The Copilot uses profiles for drift detection (compare current telemetry against baseline), drift correlation (config changes correlated with telemetry regressions), preset conformance assessment (telemetry within expected bounds), and deployment topology comparison (replica counts, resource limits, scaling bounds).
 
 ## Project Structure
 
@@ -94,7 +112,8 @@ temporal-sre-copilot/
 │   │       ├── types.py            # ParameterClassification, enums, models
 │   │       ├── versions.py         # VersionType (packaging.version + Pydantic)
 │   │       ├── signals.py          # Signal taxonomy
-│   │       └── models.py           # TelemetryBound, MetricAggregate, ServiceMetrics
+│   │       ├── models.py           # TelemetryBound, MetricAggregate, ServiceMetrics
+│   │       └── deployment.py       # DeploymentProfile, DeploymentContext, ResourceIdentity
 │   │
 │   ├── dsql_config/                # config compiler + CLI
 │   │   └── src/dsql_config/
@@ -119,9 +138,10 @@ temporal-sre-copilot/
 │   └── copilot/                    # orchestrator
 │       └── src/copilot/
 │           ├── workflows/          # Temporal workflows (4)
-│           ├── activities/         # I/O: AMP, Loki, RAG, state store
+│           ├── activities/         # I/O: AMP, Loki, RAG, state store, inspect
 │           ├── agents/             # Pydantic AI: dispatcher + researcher
-│           ├── models/             # Signal taxonomy, state machine, config
+│           ├── inspectors/         # PlatformInspector: ECS, Compose
+│           ├── models/             # Signal taxonomy, state machine, config, scale bands
 │           ├── db/                 # DSQL schema (includes profile_metadata table)
 │           ├── cli/                # Typer CLI (copilot db, copilot kb)
 │           ├── api.py              # FastAPI app (mounts profile router)
@@ -129,16 +149,19 @@ temporal-sre-copilot/
 │
 ├── tests/                          # shared test directory
 │   ├── properties/                 # Hypothesis property-based tests
+│   │   ├── strategies.py           # Shared Hypothesis strategies
 │   │   ├── test_config_compiler.py
 │   │   ├── test_behaviour_profiles.py
 │   │   ├── test_state_machine.py
-│   │   └── test_bottleneck.py
+│   │   ├── test_bottleneck.py
+│   │   └── test_scale_aware_thresholds.py
 │   ├── test_presets.py
 │   ├── test_guard_rails.py
 │   ├── test_adapters.py
 │   ├── test_backward_compat.py
 │   ├── test_profile_api.py
 │   ├── test_serialization.py
+│   ├── test_scale_aware_thresholds.py
 │   └── test_workflow_sandbox.py
 │
 ├── dev/                            # standalone dev environment
@@ -187,7 +210,7 @@ Individual commands:
 ```bash
 just install      # sync virtualenv
 just lint         # ruff check + ruff format
-just test         # pytest (156 tests, ~10s)
+just test         # pytest (193 tests, ~10s)
 just typing       # ty check
 ```
 
@@ -206,6 +229,7 @@ just typing       # ty check
 ### Package Boundaries
 
 - Shared types (`ParameterClassification`, `MetricAggregate`, `TelemetryBound`, `VersionType`) live in `copilot_core`
+- Deployment models (`DeploymentProfile`, `DeploymentContext`, `ResourceIdentity`, `ScalingTopology`) live in `copilot_core.deployment`
 - `dsql_config` does NOT depend on `behaviour_profiles` — they only share types through `copilot_core`
 - New shared models go in `copilot_core.types` or `copilot_core.models`
 - Version fields use `packaging.version.Version` via `copilot_core.versions.VersionType`
@@ -246,8 +270,13 @@ async def fetch_signals(prometheus_endpoint: str) -> Signals: ...
 The state machine is deterministic. Only primary signals decide state — amplifiers explain WHY later. The LLM never decides state transitions.
 
 ```python
-# CORRECT
-health_state = evaluate_health_state(signals.primary, current_state)
+# CORRECT — evaluate_health_state returns (HealthState, consecutive_critical_count, ScaleBand)
+health_state, critical_count, scale_band = evaluate_health_state(
+    signals.primary, current_state,
+    current_scale_band=scale_band,
+    deployment_context=context,
+    overrides=config.threshold_overrides,
+)
 explanation = await llm.explain(health_state, signals)
 
 # WRONG
@@ -281,9 +310,9 @@ State transitions: `Happy → Stressed → Critical`. No direct `Happy → Criti
 
 ### Testing
 
-- Property-based tests with Hypothesis for invariants (state machine, bottleneck, config compiler, profiles)
-- Serialization round-trip tests for all Pydantic models
-- Workflow sandbox tests for Temporal data converter compatibility
+- Property-based tests with Hypothesis for invariants (state machine, bottleneck, config compiler, profiles, scale-aware thresholds)
+- Serialization round-trip tests for all Pydantic models (including deployment models)
+- Workflow sandbox tests for Temporal data converter compatibility (including scale-aware inputs)
 - Property tests live in `tests/properties/`
 - Run with `just test` or `uv run -m pytest`
 - Cover success and failure cases
@@ -308,6 +337,7 @@ Full requirements, design, and tasks:
 
 - `.kiro/specs/temporal-sre-copilot/` — Copilot spec (requirements, design, tasks)
 - `.kiro/specs/enhance-config-ux/` — Config Compiler + Behaviour Profiles spec (requirements, design, tasks)
+- `.kiro/specs/scale-aware-thresholds/` — Scale-aware thresholds spec (requirements, design, tasks)
 - `.kiro/specs/standalone-dev/` — Standalone dev environment spec (requirements, design, tasks)
 
 ## Standalone Dev Environment

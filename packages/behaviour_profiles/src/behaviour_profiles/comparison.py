@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 from behaviour_profiles.models import (
     BehaviourProfile,
     ConfigDiff,
+    DeploymentDiff,
     ProfileComparison,
     TelemetryDiff,
     VersionDiff,
@@ -30,6 +31,7 @@ def compare_profiles(
     config_diffs = _compare_config(a, b)
     telemetry_diffs = _compare_telemetry(a, b, latency_threshold_pct, error_threshold_pct)
     version_diffs = _compare_versions(a, b)
+    deployment_diffs = _compare_deployment(a, b)
 
     # Sort telemetry diffs: critical first, then warning, then info;
     # within each by abs change_pct desc
@@ -42,6 +44,7 @@ def compare_profiles(
         config_diffs=config_diffs,
         telemetry_diffs=telemetry_diffs,
         version_diffs=version_diffs,
+        deployment_diffs=deployment_diffs,
     )
 
 
@@ -206,3 +209,53 @@ def _pct_change(old: float, new: float) -> float:
     if old == 0:
         return 0.0 if new == 0 else 100.0
     return ((new - old) / abs(old)) * 100
+
+
+def _compare_deployment(a: BehaviourProfile, b: BehaviourProfile) -> list[DeploymentDiff]:
+    """Compare deployment topology between two profiles."""
+    diffs: list[DeploymentDiff] = []
+
+    a_ctx = a.deployment_context
+    b_ctx = b.deployment_context
+
+    # Skip if neither profile has deployment context
+    if a_ctx is None and b_ctx is None:
+        return diffs
+
+    # If only one has context, report all fields as diffs
+    if a_ctx is None or b_ctx is None:
+        return diffs
+
+    # Compare per-service replica states
+    for service_name in ("history", "matching", "frontend", "worker"):
+        a_svc = getattr(a_ctx, service_name)
+        b_svc = getattr(b_ctx, service_name)
+        for field in ("running", "desired", "pending"):
+            old_val = getattr(a_svc, field)
+            new_val = getattr(b_svc, field)
+            if old_val != new_val:
+                diffs.append(
+                    DeploymentDiff(
+                        service=service_name,
+                        field=field,
+                        old_value=old_val,
+                        new_value=new_val,
+                    )
+                )
+
+    # Compare autoscaler state
+    if a_ctx.autoscaler and b_ctx.autoscaler:
+        for field in ("min_capacity", "max_capacity", "desired_capacity"):
+            old_val = getattr(a_ctx.autoscaler, field)
+            new_val = getattr(b_ctx.autoscaler, field)
+            if old_val != new_val:
+                diffs.append(
+                    DeploymentDiff(
+                        service="autoscaler",
+                        field=field,
+                        old_value=old_val,
+                        new_value=new_val,
+                    )
+                )
+
+    return diffs

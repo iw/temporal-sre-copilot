@@ -3,7 +3,18 @@
 Renders per-service environment variable maps for ECS task definitions.
 """
 
+import logging
+
+from copilot_core.deployment import (
+    AutoscalerType,
+    DeploymentProfile,
+    ResourceIdentity,
+    ScalingTopology,
+    ServiceResourceLimits,
+    ServiceScalingBounds,
+)
 from dsql_config.models import ConfigProfile, RenderedSnippet
+from dsql_config.presets import PRESETS
 
 # Mapping from parameter keys to ECS environment variable names
 _DSQL_ENV_MAP: dict[str, str] = {
@@ -104,3 +115,82 @@ class ECSAdapter:
             env_list.append({"name": f"TEMPORAL_{service.upper()}_REPLICAS", "value": str(p.value)})
 
         return json.dumps(env_list, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Deployment adapter — produces DeploymentProfile from ConfigProfile + annotations
+# ---------------------------------------------------------------------------
+
+_log = logging.getLogger(__name__)
+
+_SERVICES = ("history", "matching", "frontend", "worker")
+
+
+def _build_service_bounds(
+    annotations: dict[str, str],
+    service: str,
+    topology_defaults: dict[str, int | float | str | bool],
+) -> ServiceScalingBounds:
+    desired = int(annotations.get(f"{service}_desired_count", "1"))
+    min_cap = int(annotations.get(f"{service}_min_capacity", str(desired)))
+    max_cap = int(annotations.get(f"{service}_max_capacity", str(desired)))
+
+    # Warn when max_replicas is below the topology default
+    default_replicas = topology_defaults.get(f"{service}.replicas")
+    if default_replicas is not None and max_cap < int(default_replicas):
+        _log.warning(
+            "ECS %s max_capacity (%d) < topology default (%s)",
+            service,
+            max_cap,
+            default_replicas,
+        )
+
+    cpu = annotations.get(f"{service}_cpu")
+    mem = annotations.get(f"{service}_memory")
+    return ServiceScalingBounds(
+        min_replicas=min_cap,
+        max_replicas=max_cap,
+        resource_limits=ServiceResourceLimits(
+            cpu_millicores=int(cpu) if cpu else None,
+            memory_mib=int(mem) if mem else None,
+        ),
+    )
+
+
+class ECSDeploymentAdapter:
+    platform: str = "ecs"
+    name: str = "ecs-deployment"
+
+    def render_deployment(
+        self,
+        profile: ConfigProfile,
+        annotations: dict[str, str],
+    ) -> DeploymentProfile:
+        topology_defaults = {p.key: p.value for p in profile.topology_params}
+
+        scaling = ScalingTopology(
+            history=_build_service_bounds(annotations, "history", topology_defaults),
+            matching=_build_service_bounds(annotations, "matching", topology_defaults),
+            frontend=_build_service_bounds(annotations, "frontend", topology_defaults),
+            worker=_build_service_bounds(annotations, "worker", topology_defaults),
+            autoscaler_type=AutoscalerType(annotations.get("autoscaler_type", "fixed")),
+        )
+
+        identity = ResourceIdentity(
+            dsql_endpoint=annotations["dsql_endpoint"],
+            platform_identifier=annotations["ecs_cluster_arn"],
+            platform_type="ecs",
+            amp_workspace_id=annotations.get("amp_workspace_id"),
+        )
+
+        preset = PRESETS.get(profile.preset_name)
+        throughput_min = preset.throughput_range.min_st_per_sec if preset else 0.0
+        throughput_max = preset.throughput_range.max_st_per_sec if preset else None
+
+        return DeploymentProfile(
+            preset_name=profile.preset_name,
+            throughput_range_min=throughput_min,
+            throughput_range_max=throughput_max,
+            scaling_topology=scaling,
+            resource_identity=identity,
+        )

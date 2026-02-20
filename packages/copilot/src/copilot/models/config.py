@@ -9,6 +9,8 @@ Health State Gates:
 - HAPPY: Otherwise
 """
 
+from enum import StrEnum
+
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
@@ -282,4 +284,187 @@ class CopilotConfig(BaseSettings):
     amplifiers: AmplifierThresholds = Field(default_factory=AmplifierThresholds)
     narrative_patterns: NarrativePatterns = Field(default_factory=NarrativePatterns)
 
+    # Scale-aware threshold overrides (optional)
+    threshold_overrides: ThresholdOverrides | None = Field(
+        default=None,
+        description="Per-threshold overrides that take precedence over scale band defaults",
+    )
+
     model_config = {"env_prefix": "COPILOT_"}
+
+
+# =============================================================================
+# SCALE-AWARE THRESHOLDS
+# =============================================================================
+
+
+class ScaleBand(StrEnum):
+    """Scale band aligned with Config Compiler presets.
+
+    Throughput ranges (state transitions per second):
+    - STARTER: 0-50 st/sec (dev clusters, low-throughput workloads)
+    - MID_SCALE: 50-500 st/sec (moderate production workloads)
+    - HIGH_THROUGHPUT: 500+ st/sec (high-throughput production)
+    """
+
+    STARTER = "starter"
+    MID_SCALE = "mid-scale"
+    HIGH_THROUGHPUT = "high-throughput"
+
+
+class ThresholdProfile(BaseModel):
+    """Complete threshold set for a scale band."""
+
+    scale_band: ScaleBand
+    critical: CriticalThresholds
+    stressed: StressedThresholds
+    healthy: HealthyThresholds
+
+
+class ThresholdOverrides(BaseModel):
+    """Optional per-threshold overrides that take precedence over scale band defaults.
+
+    Only non-None fields are applied. This allows operators to tune
+    individual thresholds without replacing the entire profile.
+    """
+
+    # Critical overrides
+    state_transitions_min_per_sec: float | None = None
+    history_processing_rate_min_per_sec: float | None = None
+    completion_rate_demand_floor_per_sec: float | None = None
+    history_backlog_age_max_sec: float | None = None
+    persistence_error_rate_max_per_sec: float | None = None
+
+    # Stressed overrides
+    state_transition_latency_p99_max_ms: float | None = None
+    history_backlog_age_stress_sec: float | None = None
+    frontend_latency_p99_max_ms: float | None = None
+    persistence_latency_p99_max_ms: float | None = None
+    poller_timeout_rate_max: float | None = None
+
+    # Healthy overrides
+    state_transitions_healthy_per_sec: float | None = None
+    history_backlog_age_healthy_sec: float | None = None
+    workflow_completion_rate_healthy: float | None = None
+
+
+# Pre-built profiles for each scale band.
+# Starter accommodates DSQL baseline latency and low-throughput characteristics.
+# High-throughput retains current production-calibrated defaults.
+THRESHOLD_PROFILES: dict[ScaleBand, ThresholdProfile] = {
+    ScaleBand.STARTER: ThresholdProfile(
+        scale_band=ScaleBand.STARTER,
+        critical=CriticalThresholds(
+            state_transitions_min_per_sec=0.5,
+            history_processing_rate_min_per_sec=0.5,
+            completion_rate_demand_floor_per_sec=0.5,
+            history_backlog_age_max_sec=600.0,
+        ),
+        stressed=StressedThresholds(
+            state_transition_latency_p99_max_ms=2000.0,
+            history_backlog_age_stress_sec=120.0,
+            frontend_latency_p99_max_ms=3000.0,
+            persistence_latency_p99_max_ms=500.0,
+            poller_timeout_rate_max=0.5,
+        ),
+        healthy=HealthyThresholds(
+            state_transitions_healthy_per_sec=0.5,
+            history_backlog_age_healthy_sec=120.0,
+        ),
+    ),
+    ScaleBand.MID_SCALE: ThresholdProfile(
+        scale_band=ScaleBand.MID_SCALE,
+        critical=CriticalThresholds(
+            state_transitions_min_per_sec=3.0,
+            history_processing_rate_min_per_sec=3.0,
+            completion_rate_demand_floor_per_sec=3.0,
+            history_backlog_age_max_sec=300.0,
+        ),
+        stressed=StressedThresholds(
+            state_transition_latency_p99_max_ms=1000.0,
+            history_backlog_age_stress_sec=60.0,
+            frontend_latency_p99_max_ms=2000.0,
+            persistence_latency_p99_max_ms=200.0,
+            poller_timeout_rate_max=0.3,
+        ),
+        healthy=HealthyThresholds(
+            state_transitions_healthy_per_sec=5.0,
+            history_backlog_age_healthy_sec=60.0,
+        ),
+    ),
+    ScaleBand.HIGH_THROUGHPUT: ThresholdProfile(
+        scale_band=ScaleBand.HIGH_THROUGHPUT,
+        critical=CriticalThresholds(),  # Production defaults
+        stressed=StressedThresholds(),  # Production defaults
+        healthy=HealthyThresholds(),  # Production defaults
+    ),
+}
+
+
+def _apply_overrides(profile: ThresholdProfile, overrides: ThresholdOverrides) -> None:
+    """Apply non-None override fields to a threshold profile (mutates in place)."""
+    for field_name in (
+        "state_transitions_min_per_sec",
+        "history_processing_rate_min_per_sec",
+        "completion_rate_demand_floor_per_sec",
+        "history_backlog_age_max_sec",
+        "persistence_error_rate_max_per_sec",
+    ):
+        val = getattr(overrides, field_name)
+        if val is not None:
+            setattr(profile.critical, field_name, val)
+
+    for field_name in (
+        "state_transition_latency_p99_max_ms",
+        "history_backlog_age_stress_sec",
+        "frontend_latency_p99_max_ms",
+        "persistence_latency_p99_max_ms",
+        "poller_timeout_rate_max",
+    ):
+        val = getattr(overrides, field_name)
+        if val is not None:
+            setattr(profile.stressed, field_name, val)
+
+    for field_name in (
+        "state_transitions_healthy_per_sec",
+        "history_backlog_age_healthy_sec",
+        "workflow_completion_rate_healthy",
+    ):
+        val = getattr(overrides, field_name)
+        if val is not None:
+            setattr(profile.healthy, field_name, val)
+
+
+def _validate_threshold_ordering(profile: ThresholdProfile) -> None:
+    """Validate that threshold ordering invariants hold.
+
+    Raises ValueError if critical > healthy for throughput thresholds.
+    Equal values are allowed (e.g., STARTER band where both are 0.5).
+    """
+    if (
+        profile.critical.state_transitions_min_per_sec
+        > profile.healthy.state_transitions_healthy_per_sec
+    ):
+        raise ValueError(
+            f"critical.state_transitions_min_per_sec "
+            f"({profile.critical.state_transitions_min_per_sec}) must be ≤ "
+            f"healthy.state_transitions_healthy_per_sec "
+            f"({profile.healthy.state_transitions_healthy_per_sec})"
+        )
+
+
+def get_threshold_profile(
+    scale_band: ScaleBand,
+    *,
+    overrides: ThresholdOverrides | None = None,
+) -> ThresholdProfile:
+    """Get the threshold profile for a scale band, with optional overrides.
+
+    Raises:
+        ValueError: If overrides violate the ordering invariant.
+    """
+    profile = THRESHOLD_PROFILES[scale_band].model_copy(deep=True)
+    if overrides:
+        _apply_overrides(profile, overrides)
+        _validate_threshold_ordering(profile)
+    return profile

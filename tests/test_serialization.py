@@ -821,3 +821,245 @@ class TestEdgeCases:
         assert len(restored.issues) == 20
         assert restored.issues[0].severity == Severity.CRITICAL
         assert restored.issues[1].severity == Severity.WARNING
+
+
+# =============================================================================
+# 9. DEPLOYMENT MODELS — Scale-aware thresholds (Layer 2 + Layer 3)
+# =============================================================================
+
+
+class TestDeploymentModelSerialization:
+    """Test DeploymentProfile and DeploymentContext survive the Temporal round-trip."""
+
+    def test_deployment_profile_round_trip(self):
+        from copilot_core.deployment import (
+            AutoscalerType,
+            DeploymentProfile,
+            ResourceIdentity,
+            ScalingTopology,
+            ServiceResourceLimits,
+            ServiceScalingBounds,
+        )
+
+        original = DeploymentProfile(
+            preset_name="mid-scale",
+            throughput_range_min=50.0,
+            throughput_range_max=500.0,
+            scaling_topology=ScalingTopology(
+                history=ServiceScalingBounds(
+                    min_replicas=4,
+                    max_replicas=8,
+                    resource_limits=ServiceResourceLimits(cpu_millicores=4000, memory_mib=8192),
+                ),
+                matching=ServiceScalingBounds(min_replicas=2, max_replicas=6),
+                frontend=ServiceScalingBounds(min_replicas=2, max_replicas=4),
+                worker=ServiceScalingBounds(min_replicas=1, max_replicas=2),
+                autoscaler_type=AutoscalerType.HPA,
+            ),
+            resource_identity=ResourceIdentity(
+                dsql_endpoint="test.dsql.eu-west-1.on.aws",
+                platform_identifier="arn:aws:ecs:eu-west-1:123456789:cluster/temporal",
+                platform_type="ecs",
+                amp_workspace_id="ws-abc123",
+            ),
+        )
+        restored, _ = _temporal_round_trip(original)
+        assert restored.preset_name == "mid-scale"
+        assert restored.scaling_topology.history.min_replicas == 4
+        assert restored.scaling_topology.autoscaler_type == AutoscalerType.HPA
+        assert restored.resource_identity.platform_type == "ecs"
+
+    def test_deployment_profile_minimal(self):
+        from copilot_core.deployment import DeploymentProfile
+
+        original = DeploymentProfile(
+            preset_name="starter",
+            throughput_range_min=0.0,
+        )
+        restored, _ = _temporal_round_trip(original)
+        assert restored.scaling_topology is None
+        assert restored.resource_identity is None
+        assert restored.config_profile_id is None
+
+    def test_deployment_context_round_trip(self):
+        from copilot_core.deployment import (
+            AutoscalerState,
+            DeploymentContext,
+            DSQLConnectionState,
+            ServiceReplicaState,
+        )
+
+        original = DeploymentContext(
+            history=ServiceReplicaState(running=6, desired=6, pending=0, cpu_utilization_pct=45.0),
+            matching=ServiceReplicaState(running=4, desired=4),
+            frontend=ServiceReplicaState(running=3, desired=3),
+            worker=ServiceReplicaState(running=2, desired=2),
+            autoscaler=AutoscalerState(
+                min_capacity=6, max_capacity=10, desired_capacity=8, actively_scaling=True
+            ),
+            dsql=DSQLConnectionState(
+                current_connections=750,
+                max_connections=10000,
+                connections_per_service={"history": 300, "matching": 200},
+            ),
+            timestamp="2026-02-20T10:00:00Z",
+        )
+        restored, _ = _temporal_round_trip(original)
+        assert restored.history.running == 6
+        assert restored.history.cpu_utilization_pct == 45.0
+        assert restored.autoscaler.actively_scaling is True
+        assert restored.dsql.connections_per_service["history"] == 300
+        assert restored.timestamp == "2026-02-20T10:00:00Z"
+
+    def test_deployment_context_minimal(self):
+        from copilot_core.deployment import DeploymentContext, ServiceReplicaState
+
+        original = DeploymentContext(
+            history=ServiceReplicaState(running=1, desired=1),
+            matching=ServiceReplicaState(running=1, desired=1),
+            frontend=ServiceReplicaState(running=1, desired=1),
+            worker=ServiceReplicaState(running=1, desired=1),
+            timestamp="2026-02-20T10:00:00Z",
+        )
+        restored, _ = _temporal_round_trip(original)
+        assert restored.autoscaler is None
+        assert restored.dsql is None
+
+    def test_resource_identity_round_trip(self):
+        from copilot_core.deployment import ResourceIdentity
+
+        original = ResourceIdentity(
+            dsql_endpoint="test.dsql.eu-west-1.on.aws",
+            platform_identifier="temporal-dev",
+            platform_type="compose",
+        )
+        restored, _ = _temporal_round_trip(original)
+        assert restored.platform_type == "compose"
+        assert restored.amp_workspace_id is None
+
+
+# =============================================================================
+# 10. BACKWARD COMPATIBILITY — new optional fields deserialize from old JSON
+# =============================================================================
+
+
+class TestBackwardCompatibility:
+    """Verify that JSON without new deployment fields deserializes with None defaults."""
+
+    def test_behaviour_profile_without_deployment_context(self):
+        """BehaviourProfile JSON from before scale-aware thresholds deserializes correctly."""
+        from behaviour_profiles.models import BehaviourProfile
+        from copilot_core.models import MetricAggregate, ServiceMetrics
+
+        # Build a profile without deployment_context (old format)
+        ma = MetricAggregate(min=0.0, max=10.0, mean=5.0, p50=4.0, p95=8.0, p99=9.0)
+        sm = ServiceMetrics(history=ma, matching=ma, frontend=ma, worker=ma)
+        from behaviour_profiles.models import (
+            DSQLPoolMetrics,
+            ErrorMetrics,
+            LatencyMetrics,
+            MatchingMetrics,
+            ResourceMetrics,
+            TelemetrySummary,
+            ThroughputMetrics,
+        )
+
+        telemetry = TelemetrySummary(
+            throughput=ThroughputMetrics(
+                workflows_started_per_sec=ma,
+                workflows_completed_per_sec=ma,
+                state_transitions_per_sec=ma,
+            ),
+            latency=LatencyMetrics(
+                workflow_schedule_to_start_p95=ma,
+                workflow_schedule_to_start_p99=ma,
+                activity_schedule_to_start_p95=ma,
+                activity_schedule_to_start_p99=ma,
+                persistence_latency_p95=ma,
+                persistence_latency_p99=ma,
+            ),
+            matching=MatchingMetrics(
+                sync_match_rate=ma,
+                async_match_rate=ma,
+                task_dispatch_latency=ma,
+                backlog_count=ma,
+                backlog_age=ma,
+            ),
+            dsql_pool=DSQLPoolMetrics(
+                pool_open_count=ma,
+                pool_in_use_count=ma,
+                pool_idle_count=ma,
+                reservoir_size=ma,
+                reservoir_empty_events=ma,
+                open_failures=ma,
+                reconnect_count=ma,
+            ),
+            errors=ErrorMetrics(
+                occ_conflicts_per_sec=ma,
+                exhausted_retries_per_sec=ma,
+                dsql_auth_failures=ma,
+            ),
+            resources=ResourceMetrics(
+                cpu_utilization=sm,
+                memory_utilization=sm,
+                worker_task_slot_utilization=ma,
+            ),
+        )
+
+        profile = BehaviourProfile(
+            id="test-1",
+            name="test",
+            cluster_id="cluster-1",
+            time_window_start="2026-02-20T09:00:00Z",
+            time_window_end="2026-02-20T10:00:00Z",
+            telemetry=telemetry,
+            created_at="2026-02-20T10:00:00Z",
+        )
+
+        # Serialize, then strip deployment_context to simulate old JSON
+        json_bytes = to_json(profile)
+        restored = TypeAdapter(BehaviourProfile).validate_json(json_bytes)
+        assert restored.deployment_context is None
+
+    def test_config_snapshot_without_deployment_profile(self):
+        """ConfigSnapshot JSON without deployment_profile deserializes correctly."""
+        from behaviour_profiles.models import (
+            ConfigSnapshot,
+            DSQLPluginSnapshot,
+            WorkerOptionsSnapshot,
+        )
+
+        snapshot = ConfigSnapshot(
+            dynamic_config=[],
+            server_env_vars=[],
+            worker_options=WorkerOptionsSnapshot(),
+            dsql_plugin_config=DSQLPluginSnapshot(
+                reservoir_enabled=True,
+                reservoir_target_ready=50,
+                reservoir_base_lifetime_min=11.0,
+                reservoir_lifetime_jitter_min=2.0,
+                reservoir_guard_window_sec=45.0,
+                max_conns=50,
+                max_idle_conns=50,
+                max_conn_lifetime_min=55.0,
+                distributed_rate_limiter_enabled=False,
+                token_bucket_enabled=False,
+                slot_block_enabled=False,
+            ),
+        )
+        restored, _ = _temporal_round_trip(snapshot)
+        assert restored.deployment_profile is None
+
+    def test_profile_comparison_without_deployment_diffs(self):
+        """ProfileComparison JSON without deployment_diffs deserializes correctly."""
+        from behaviour_profiles.models import ProfileComparison
+
+        comparison = ProfileComparison(
+            profile_a_id="a",
+            profile_b_id="b",
+            config_diffs=[],
+            telemetry_diffs=[],
+            version_diffs=[],
+        )
+        restored, _ = _temporal_round_trip(comparison)
+        assert restored.deployment_diffs == []

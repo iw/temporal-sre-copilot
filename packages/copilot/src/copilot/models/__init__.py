@@ -59,7 +59,11 @@ from .config import (
     CriticalThresholds,
     HealthyThresholds,
     NarrativePatterns,
+    ScaleBand,
     StressedThresholds,
+    ThresholdOverrides,
+    ThresholdProfile,
+    get_threshold_profile,
 )
 from .signals import (
     # Primary signal components
@@ -96,8 +100,10 @@ from .state_machine import (
     WorkerScalingContext,
     WorkerScalingWarning,
     classify_bottleneck,
+    classify_scale_band,
     evaluate_health_state,
     evaluate_worker_scaling_rules,
+    refine_thresholds,
 )
 from .workflow_inputs import (
     AssessHealthInput,
@@ -164,10 +170,16 @@ __all__ = [
     "AmplifierThresholds",
     "NarrativePatterns",
     "CopilotConfig",
+    "ScaleBand",
+    "ThresholdProfile",
+    "ThresholdOverrides",
+    "get_threshold_profile",
     # State Machine
     "evaluate_health_state",
     "classify_bottleneck",
+    "classify_scale_band",
     "evaluate_worker_scaling_rules",
+    "refine_thresholds",
     "WorkerScalingWarning",
     "WorkerScalingContext",
     # Workflow Inputs
