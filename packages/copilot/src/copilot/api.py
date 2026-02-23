@@ -280,7 +280,21 @@ def _is_cluster_idle(primary_signals: dict) -> bool:
     has_no_errors = frontend_errors < 0.1 and persistence_errors < 0.1
     has_no_backlog = backlog < 1.0 and wf_backlog < 1.0 and act_backlog < 1.0
 
-    return has_no_throughput and has_no_errors and has_no_backlog
+    # Check for system operations (retention, archival) — if active, not idle
+    if "state_transitions" in primary_signals and isinstance(
+        primary_signals["state_transitions"], dict
+    ):
+        sys_ops = primary_signals.get("system_operations", {})
+        deletion_rate = sys_ops.get("deletion_rate_per_sec", 0) if isinstance(sys_ops, dict) else 0
+        cleanup_rate = (
+            sys_ops.get("cleanup_delete_rate_per_sec", 0) if isinstance(sys_ops, dict) else 0
+        )
+    else:
+        deletion_rate = primary_signals.get("system_deletion_rate", 0)
+        cleanup_rate = primary_signals.get("system_cleanup_delete_rate", 0)
+    has_no_system_ops = deletion_rate < 1.0 and cleanup_rate < 0.5
+
+    return has_no_throughput and has_no_errors and has_no_backlog and has_no_system_ops
 
 
 def _get_signal(primary_signals: dict, nested_path: str, flat_key: str, default=0):

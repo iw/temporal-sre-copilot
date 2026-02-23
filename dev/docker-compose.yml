@@ -434,7 +434,7 @@ services:
     command: ["python", "-m", "copilot.worker"]
     volumes:
       - ~/.aws:/home/copilot/.aws:ro
-      - ../.temporal-dsql/dev/deployment-profile.json:/app/deployment-profile.json:ro
+      - ../.temporal-dsql/dev/current/deployment_profile.json:/app/deployment_profile.json:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - TEMPORAL_ADDRESS=copilot-temporal:7233
@@ -447,7 +447,7 @@ services:
       - AWS_SHARED_CREDENTIALS_FILE=/home/copilot/.aws/credentials
       - AWS_CONFIG_FILE=/home/copilot/.aws/config
       - KNOWLEDGE_BASE_ID=${COPILOT_KNOWLEDGE_BASE_ID:-}
-      - DEPLOYMENT_PROFILE=/app/deployment-profile.json
+      - DEPLOYMENT_PROFILE=/app/deployment_profile.json
     networks:
       - temporal-network
     restart: unless-stopped

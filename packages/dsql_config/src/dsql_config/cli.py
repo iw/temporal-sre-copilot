@@ -9,6 +9,7 @@ Commands:
 
 from __future__ import annotations
 
+import uuid
 from pathlib import Path  # noqa: TC003 — Typer evaluates type hints at runtime
 from typing import Annotated
 
@@ -29,7 +30,7 @@ app = typer.Typer(
 console = Console()
 
 CONFIG_BASE_DIR = Path(".temporal-dsql")
-LATEST_FILE = ".latest"
+ACTIVE_CONTEXT_FILE = ".active_context"
 
 
 def _build_compiler() -> ConfigCompiler:
@@ -62,13 +63,20 @@ def _parse_overrides(overrides: list[str]) -> ParameterOverrides:
 
 def _resolve_output_dir(
     *, name: str | None, output: Path | None, preset: str, modifier: str | None
-) -> Path:
+) -> tuple[Path, str]:
     """Resolve the output directory for compiled artifacts.
 
-    Priority: --output (explicit path) > --name (under .temporal-dsql/) > auto-generated name.
+    Each invocation creates a new instantiation (UUID) under the config name.
+
+    Priority: --output (explicit path, no UUID) > --name (under .temporal-dsql/<name>/<uuid>/).
+
+    Returns:
+        Tuple of (output directory path, config profile ID).
     """
+    config_profile_id = str(uuid.uuid4())
+
     if output:
-        return output
+        return output, config_profile_id
 
     if not name:
         parts = [preset]
@@ -76,41 +84,49 @@ def _resolve_output_dir(
             parts.append(modifier)
         name = "-".join(parts)
 
-    return CONFIG_BASE_DIR / name
+    return CONFIG_BASE_DIR / name / config_profile_id, config_profile_id
 
 
-def _write_latest(config_name: str) -> None:
-    """Write the .latest file pointing to the given config name."""
+def _write_active_context(name: str, config_profile_id: str) -> None:
+    """Write the active context file pointing to the given config name and ID."""
     CONFIG_BASE_DIR.mkdir(parents=True, exist_ok=True)
-    (CONFIG_BASE_DIR / LATEST_FILE).write_text(config_name + "\n")
+    (CONFIG_BASE_DIR / ACTIVE_CONTEXT_FILE).write_text(f"{name}/{config_profile_id}\n")
 
 
-def _read_latest() -> str | None:
-    """Read the latest config name from .temporal-dsql/.latest, or None."""
-    latest_path = CONFIG_BASE_DIR / LATEST_FILE
-    if not latest_path.exists():
+def _read_active_context() -> tuple[str, str] | None:
+    """Read the active context from .temporal-dsql/.active_context.
+
+    Returns:
+        Tuple of (config name, config profile ID) or None.
+    """
+    ctx_path = CONFIG_BASE_DIR / ACTIVE_CONTEXT_FILE
+    if not ctx_path.exists():
         return None
-    content = latest_path.read_text().strip()
-    return content if content else None
+    content = ctx_path.read_text().strip()
+    if not content or "/" not in content:
+        return None
+    name, profile_id = content.split("/", 1)
+    return (name, profile_id) if name and profile_id else None
 
 
 def _resolve_profile_path(profile_json: Path | None) -> Path:
-    """Resolve a profile.json path, falling back to .latest if no path given."""
+    """Resolve a profile.json path, falling back to active context if no path given."""
     if profile_json:
         return profile_json
 
-    latest = _read_latest()
-    if not latest:
-        console.print("[red]No --profile given and no .temporal-dsql/.latest found.[/red]")
+    ctx = _read_active_context()
+    if not ctx:
+        console.print("[red]No --profile given and no .temporal-dsql/.active_context found.[/red]")
         console.print("Run [cyan]compile[/cyan] first, or pass --profile explicitly.")
         raise typer.Exit(1)
 
-    path = CONFIG_BASE_DIR / latest / "profile.json"
+    name, profile_id = ctx
+    path = CONFIG_BASE_DIR / name / profile_id / "profile.json"
     if not path.exists():
         console.print(f"[red]Profile not found: {path}[/red]")
         raise typer.Exit(1)
 
-    console.print(f"[dim]Using latest config: {latest}[/dim]")
+    console.print(f"[dim]Using active context: {name}/{profile_id}[/dim]")
     return path
 
 
@@ -170,8 +186,13 @@ def compile(
     # Determine whether to write artifacts or print to stdout
     should_write = name is not None or output_dir is not None
 
+    target: Path | None = None
+    config_profile_id: str | None = None
+
     if should_write:
-        target = _resolve_output_dir(name=name, output=output_dir, preset=preset, modifier=modifier)
+        target, config_profile_id = _resolve_output_dir(
+            name=name, output=output_dir, preset=preset, modifier=modifier
+        )
         target.mkdir(parents=True, exist_ok=True)
 
         (target / "profile.json").write_text(result.profile.model_dump_json(indent=2))
@@ -182,12 +203,13 @@ def compile(
         for snippet in result.sdk_snippets + result.platform_snippets:
             (target / snippet.filename).write_text(snippet.content)
 
-        # Update .latest when writing to the convention directory (not --output)
+        # Update active context when writing to the convention directory (not --output)
         if not output_dir:
             config_name = name if name else f"{preset}-{modifier}" if modifier else preset
-            _write_latest(config_name)
+            _write_active_context(config_name, config_profile_id)
 
         console.print(f"[green]Artifacts written to {target}[/green]")
+        console.print(f"[dim]Config profile ID: {config_profile_id}[/dim]")
         if result.guard_rail_results:
             for gr in result.guard_rail_results:
                 color = "yellow" if gr.severity == "warning" else "red"
@@ -214,7 +236,8 @@ def compile(
             deployment=deployment,
             from_path=from_path,
             annotations=annotation or [],
-            output_dir=target if should_write else None,
+            output_dir=target,
+            config_profile_id=config_profile_id,
         )
 
 
@@ -225,6 +248,7 @@ def _emit_deployment_profile(
     from_path: Path | None,
     annotations: list[str],
     output_dir: Path | None,
+    config_profile_id: str | None = None,
 ) -> None:
     """Generate a DeploymentProfile and write it alongside other artifacts.
 
@@ -271,6 +295,10 @@ def _emit_deployment_profile(
 
     deployment_profile = matched[0].render_deployment(profile, ann)
 
+    # Stamp the config profile ID onto the deployment profile
+    if config_profile_id:
+        deployment_profile.config_profile_id = config_profile_id
+
     # Validate round-trip
     from copilot_core.deployment import DeploymentProfile
 
@@ -279,7 +307,7 @@ def _emit_deployment_profile(
 
     # Write output
     if output_dir:
-        output_path = output_dir / "deployment-profile.json"
+        output_path = output_dir / "deployment_profile.json"
         output_path.write_text(json_str + "\n")
         console.print(f"[green]Deployment profile written to {output_path}[/green]")
     else:

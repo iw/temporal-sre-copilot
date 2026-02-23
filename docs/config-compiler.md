@@ -98,20 +98,31 @@ uv run temporal-dsql-config explain --preset mid-scale --modifier orchestrator
 uv run temporal-dsql-config explain
 ```
 
-Compiled artifacts are written to `.temporal-dsql/<name>/`:
+Compiled artifacts are written to `.temporal-dsql/<name>/<config-profile-id>/`:
 
 ```
 .temporal-dsql/
-├── .latest              # contains "prod-v2"
+├── .active_context          # contains "prod-v2/<uuid>"
 ├── prod-v2/
-│   ├── profile.json     # full ConfigProfile (used by explain --profile)
-│   ├── dynamic_config.yaml
-│   ├── dsql_plugin.json
-│   ├── deployment-profile.json  # DeploymentProfile (when --deployment used)
-│   └── ...              # SDK + platform adapter outputs
+│   ├── current -> <uuid>/   # symlink set by `dev up`
+│   └── <uuid>/
+│       ├── profile.json     # full ConfigProfile (used by explain --profile)
+│       ├── dynamic_config.yaml
+│       ├── dsql_plugin.json
+│       ├── deployment_profile.json  # DeploymentProfile (when --deployment used)
+│       ├── ...              # SDK + platform adapter outputs
+│       └── behaviour/       # behaviour profile snapshots
+│           └── <epoch>/
+│               └── behaviour_profile.json
 └── staging/
-    └── ...
+    └── <uuid>/
+        └── ...
 ```
+
+Each `compile` invocation creates a new instantiation (UUID) of the preset.
+The `.active_context` file tracks the most recently compiled profile so
+subsequent CLI commands (e.g., `explain`, `dev up`) resolve it automatically.
+Use `--context <uuid>` to target a specific instantiation.
 
 ## Explain capability
 

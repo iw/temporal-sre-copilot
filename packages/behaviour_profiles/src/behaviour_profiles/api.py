@@ -73,6 +73,8 @@ async def _fetch_cluster_versions() -> tuple[str | None, str | None]:
     """
     from temporalio.client import Client
 
+    if _monitored_temporal_address is None:
+        return None, None
     client = await Client.connect(_monitored_temporal_address)
     info = await client.workflow_service.get_cluster_info(GetClusterInfoRequest())
     server_version = info.server_version or None
@@ -121,6 +123,22 @@ async def create_profile(request: CreateProfileRequest) -> ProfileMetadata:
         except Exception:
             logger.warning("Failed to fetch cluster version info", exc_info=True)
 
+    # Convert version strings to packaging.version.Version for VersionType fields
+    from packaging.version import Version
+
+    parsed_server_version: Version | None = None
+    parsed_dsql_version: Version | None = None
+    if server_version:
+        try:
+            parsed_server_version = Version(server_version)
+        except Exception:
+            logger.warning("Could not parse server version: %s", server_version)
+    if dsql_plugin_version:
+        try:
+            parsed_dsql_version = Version(dsql_plugin_version)
+        except Exception:
+            logger.warning("Could not parse DSQL plugin version: %s", dsql_plugin_version)
+
     # Config snapshot is not auto-collected — marked None to distinguish
     # "not collected" from "collected but empty". Config collection requires
     # querying the monitored cluster's dynamic config and env vars, which
@@ -134,8 +152,8 @@ async def create_profile(request: CreateProfileRequest) -> ProfileMetadata:
         task_queue=request.task_queue,
         time_window_start=request.time_window_start,
         time_window_end=request.time_window_end,
-        temporal_server_version=server_version,
-        dsql_plugin_version=dsql_plugin_version,
+        temporal_server_version=parsed_server_version,
+        dsql_plugin_version=parsed_dsql_version,
         config_snapshot=None,
         telemetry=telemetry,
         created_at=Instant.now().format_iso(),
@@ -152,7 +170,7 @@ async def list_profiles(
 ) -> list[ProfileMetadata]:
     """List profile metadata with optional filters."""
     storage = _get_storage()
-    return await storage.list(cluster=cluster, label=label, namespace=namespace)
+    return await storage.list_profiles(cluster=cluster, label=label, namespace=namespace)
 
 
 @router.get("/{profile_id}")

@@ -89,10 +89,11 @@ class ObserveClusterWorkflow:
             try:
                 # Fetch deployment context every N cycles
                 should_fetch = (
-                    resource_identity
+                    resource_identity is not None
                     and self._cycles_since_context_fetch >= self._context_fetch_interval
                 )
                 if should_fetch:
+                    assert resource_identity is not None  # narrowing for ty
                     self._deployment_context = await workflow.execute_activity(
                         fetch_deployment_context,
                         FetchDeploymentContextInput(resource_identity=resource_identity),

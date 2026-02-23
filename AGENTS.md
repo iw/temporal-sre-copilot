@@ -403,4 +403,4 @@ just copilot dev infra destroy   # Tear down ephemeral AWS resources
 - `temporal-dsql-deploy` is still used for production ECS deployments and benchmarking
 - `dev/` is a standalone fork of the copilot profile — configs can evolve independently
 - The `temporal-dsql` repo remains an external dependency for building the Temporal server binary
-- `just config compile starter --name dev --deployment compose --from dev/docker-compose.yml` compiles the starter preset and generates a deployment profile from the compose file into `.temporal-dsql/dev/` — the copilot-worker reads it at boot via `DEPLOYMENT_PROFILE` env var
+- `just config compile starter --name dev --deployment compose --from dev/docker-compose.yml` compiles the starter preset and generates a deployment profile from the compose file into `.temporal-dsql/dev/<uuid>/` — the copilot-worker reads it at boot via `DEPLOYMENT_PROFILE` env var. Each compile creates a new instantiation; `.active_context` tracks the current one.

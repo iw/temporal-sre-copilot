@@ -139,8 +139,33 @@ class PersistenceSignals(BaseModel):
     retry_rate_per_sec: float = Field(ge=0, description="Persistence retry rate")
 
 
+class SystemOperationSignals(BaseModel):
+    """System operation signals — retention, archival, cleanup.
+
+    These track non-workflow forward progress: the cluster is doing
+    useful work (deletions, archival) that doesn't generate state
+    transition events. Without this, a retention storm looks like
+    "zero throughput + high persistence latency" = false CRITICAL.
+
+    Sources:
+    - deletion_rate_per_sec: task_requests_total{task_type=~".*Delete.*"}
+    - cleanup_delete_rate_per_sec: workflow_cleanup_delete_total
+    """
+
+    deletion_rate_per_sec: float = Field(
+        ge=0,
+        default=0.0,
+        description="Internal deletion task processing rate (timer + visibility deletes).",
+    )
+    cleanup_delete_rate_per_sec: float = Field(
+        ge=0,
+        default=0.0,
+        description="Workflow cleanup delete rate (retention-driven).",
+    )
+
+
 class PrimarySignals(BaseModel):
-    """All 12 primary signals that decide health state.
+    """All primary signals that decide health state.
 
     These are the ONLY inputs to state transitions. They answer:
     "Is the cluster making forward progress on workflows?"
@@ -149,6 +174,10 @@ class PrimarySignals(BaseModel):
     - CRITICAL: signals 1/3/4/5 collapse or backlog age critical
     - STRESSED: signals 2/4/8/11 trending wrong
     - HAPPY: otherwise
+
+    System operations (deletion, archival) are tracked separately.
+    When system ops are active but workflow throughput is zero,
+    the cluster is busy with housekeeping — not broken.
     """
 
     state_transitions: StateTransitionSignals
@@ -158,6 +187,7 @@ class PrimarySignals(BaseModel):
     matching: MatchingSignals
     poller: PollerSignals
     persistence: PersistenceSignals
+    system_operations: SystemOperationSignals = Field(default_factory=SystemOperationSignals)
 
 
 # =============================================================================

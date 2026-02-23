@@ -96,8 +96,17 @@ Given the health state and signals, determine the appropriate response:
 SIGNAL TAXONOMY:
 - **Primary Signals**: Forward progress indicators (decide state)
   - State transitions, workflow completions, backlog age, processing rates
+- **System Operations**: Non-workflow forward progress (retention, archival)
+  - When deletion rate is high but workflow throughput is zero, the cluster
+    is doing housekeeping — this is normal, not a failure
 - **Amplifiers**: Resource pressure indicators (explain why)
   - Persistence contention, connection pool, queue depth, worker saturation
+
+IDLE/SYSTEM-BUSY PATTERNS:
+- An idle cluster with ~90s frontend latency and ~100% poller timeout rate
+  is normal (long-poll operations). Use NoExplanationNeeded.
+- A cluster with high deletion rate but zero workflow throughput is doing
+  retention cleanup. Use QuickExplanation at most.
 
 Be fast and decisive. Only escalate to deep explanation when truly needed.
 Typical response time should be 1-2 seconds."""
@@ -150,6 +159,10 @@ def build_dispatcher_prompt(
 - Poller Success Rate: {primary_signals.poller.poll_success_rate:.1%}
 - Persistence Latency p99: {primary_signals.persistence.latency_p99_ms:.0f}ms
 - Persistence Error Rate: {primary_signals.persistence.error_rate_per_sec:.2f}/sec
+
+## System Operations
+- Deletion Rate: {primary_signals.system_operations.deletion_rate_per_sec:.1f}/sec
+- Cleanup Delete Rate: {primary_signals.system_operations.cleanup_delete_rate_per_sec:.1f}/sec
 
 ## Amplifiers (Resource Pressure)
 - OCC Conflicts: {amplifiers.persistence.occ_conflicts_per_sec:.1f}/sec

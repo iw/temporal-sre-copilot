@@ -88,6 +88,7 @@ from .signals import (
     ShardAmplifiers,
     Signals,
     StateTransitionSignals,
+    SystemOperationSignals,
     ThrottlingAmplifiers,
     WorkerAmplifiers,
     WorkerCacheAmplifiers,
@@ -127,6 +128,7 @@ __all__ = [
     "HealthState",
     # Primary Signals (12)
     "PrimarySignals",
+    "SystemOperationSignals",
     "StateTransitionSignals",
     "WorkflowCompletionSignals",
     "HistorySignals",

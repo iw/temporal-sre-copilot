@@ -56,6 +56,41 @@ CRITICAL PRINCIPLE: "Rules Decide, AI Explains"
    - Focus on actionable insights
    - Avoid jargon where possible
 
+## CONSISTENCY REQUIREMENT
+
+Your narrative summary and your structured issues list MUST tell the same story.
+If your summary identifies a metric as an artifact or expected behavior (e.g.,
+frontend latency inflated by long-poll operations on an idle cluster), you MUST
+NOT flag that same metric as a high-severity issue. The severity in the issues
+list must match your assessment in the narrative.
+
+Specifically:
+- If you explain that a metric is a measurement artifact, its issue severity
+  must be "low" or it should be omitted entirely.
+- If you identify that the cluster is idle and metrics are dominated by
+  long-poll timeouts, do not flag poller timeout rate or frontend latency
+  as medium or high severity issues.
+- Connection pool wait_count and wait_duration are cumulative counters.
+  High values with 0% current utilization indicate a past event that has
+  resolved, not an active problem. Flag as "low" severity at most.
+
+## Idle and System-Busy Cluster Patterns
+
+Recognize these common patterns that are NOT problems:
+
+1. **Idle cluster with long-poll artifacts**: Zero workflow throughput,
+   ~90-100s frontend latency, ~100% poller timeout rate. This is normal —
+   workers long-poll for ~90s waiting for tasks. Not degradation.
+
+2. **System-busy cluster (retention/archival)**: Zero workflow throughput
+   but high persistence ops from deletion tasks. The cluster is doing
+   housekeeping, not broken. High persistence latency during bulk
+   deletions is expected and transient.
+
+3. **Cumulative counter artifacts**: Connection pool wait_count and
+   wait_duration accumulate over the process lifetime. A high value
+   with 0% current utilization means a past event, not a current one.
+
 ## Signal Taxonomy
 
 **Primary Signals** (decide state - forward progress indicators):
@@ -71,6 +106,10 @@ CRITICAL PRINCIPLE: "Rules Decide, AI Explains"
 10. Poller Health - Starvation and matching pressure
 11. Persistence Latency - Primary systemic dependency
 12. Persistence Error Rate - "Slow but working" vs "failing"
+
+**System Operations** (non-workflow forward progress):
+- Deletion Rate - Retention/archival task processing
+- Cleanup Delete Rate - Workflow cleanup operations
 
 **Amplifiers** (explain why - resource pressure):
 1. Persistence Contention → tune retries, increase History capacity
@@ -198,6 +237,10 @@ def build_researcher_prompt(
 - Latency p99: {primary_signals.persistence.latency_p99_ms:.0f}ms
 - Error Rate: {primary_signals.persistence.error_rate_per_sec:.2f}/sec
 - Retry Rate: {primary_signals.persistence.retry_rate_per_sec:.2f}/sec
+
+### System Operations
+- Deletion Rate: {primary_signals.system_operations.deletion_rate_per_sec:.1f}/sec
+- Cleanup Delete Rate: {primary_signals.system_operations.cleanup_delete_rate_per_sec:.1f}/sec
 
 ## Amplifiers (Resource Pressure)
 

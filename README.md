@@ -70,7 +70,7 @@ cp dev/.env.example dev/.env
 just config compile starter --name dev --deployment compose --from dev/docker-compose.yml
 ```
 
-Compiles the starter preset and generates a deployment profile from the dev compose file. All artifacts are written to `.temporal-dsql/dev/`.
+Compiles the starter preset and generates a deployment profile from the dev compose file. Artifacts are written to `.temporal-dsql/dev/<uuid>/` and the active context is set automatically.
 
 ### Build and start
 

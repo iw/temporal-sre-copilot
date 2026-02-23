@@ -40,6 +40,7 @@ from copilot.models import (
     ShardAmplifiers,
     Signals,
     StateTransitionSignals,
+    SystemOperationSignals,
     ThrottlingAmplifiers,
     WorkerAmplifiers,
     WorkerCacheAmplifiers,
@@ -138,6 +139,14 @@ PRIMARY_QUERIES = {
     # persistence_error_with_type_total exists but no dsql_tx_retry_total in Mimir
     "persistence_retry_rate": (
         'sum(rate(persistence_error_with_type_total{service_name="history"}[1m]))'
+    ),
+    # System operations: deletion and cleanup throughput
+    # These track non-workflow forward progress (retention, archival).
+    "system_deletion_rate": (
+        'sum(rate(task_requests_total{task_type=~".*Delete.*"}[1m]))'
+    ),
+    "system_cleanup_delete_rate": (
+        "sum(rate(workflow_cleanup_delete_total[1m]))"
     ),
 }
 
@@ -374,6 +383,10 @@ def _build_primary_signals(results: dict[str, float]) -> PrimarySignals:
             latency_p99_ms=results.get("persistence_latency_p99", 0),
             error_rate_per_sec=results.get("persistence_error_rate", 0),
             retry_rate_per_sec=results.get("persistence_retry_rate", 0),
+        ),
+        system_operations=SystemOperationSignals(
+            deletion_rate_per_sec=results.get("system_deletion_rate", 0),
+            cleanup_delete_rate_per_sec=results.get("system_cleanup_delete_rate", 0),
         ),
     )
 

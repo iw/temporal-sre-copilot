@@ -4,12 +4,15 @@ Validates: Requirements 12.2, 12.3
 """
 
 from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from copilot.models import HealthState, PrimarySignals
 from copilot.models.config import CriticalThresholds, HealthyThresholds, StressedThresholds
+from copilot.models.signals import SystemOperationSignals
 from copilot.models.state_machine import (
     CONSECUTIVE_CRITICAL_THRESHOLD,
     _is_idle,
+    _is_system_busy,
     evaluate_health_state,
 )
 
@@ -492,3 +495,182 @@ def test_high_frontend_latency_stressed_under_load():
     )
     result, _, _ = evaluate_health_state(signals, HealthState.HAPPY)
     assert result == HealthState.STRESSED
+
+
+# === SYSTEM-BUSY: Retention storms don't trigger false CRITICAL ===
+
+
+def _system_busy_signals(
+    *,
+    deletion_rate: float = 50.0,
+    cleanup_rate: float = 10.0,
+    persistence_error_rate: float = 0.0,
+    backlog_age: float = 1.0,
+):
+    """Cluster with zero workflow throughput but active system operations.
+
+    Simulates a retention storm: high deletion rate, zero workflow
+    throughput, otherwise healthy.
+    """
+    return PrimarySignals(
+        state_transitions={"throughput_per_sec": 0, "latency_p95_ms": 10, "latency_p99_ms": 20},
+        workflow_completion={"completion_rate": 1.0, "success_per_sec": 0, "failed_per_sec": 0},
+        history={
+            "backlog_age_sec": backlog_age,
+            "task_processing_rate_per_sec": 0,
+            "shard_churn_rate_per_sec": 0,
+        },
+        frontend={"error_rate_per_sec": 0, "latency_p95_ms": 50, "latency_p99_ms": 80},
+        matching={"workflow_backlog_age_sec": 0, "activity_backlog_age_sec": 0},
+        poller={"poll_success_rate": 0.5, "poll_timeout_rate": 0.5, "long_poll_latency_ms": 90000},
+        persistence={
+            "latency_p95_ms": 50,
+            "latency_p99_ms": 100,
+            "error_rate_per_sec": persistence_error_rate,
+            "retry_rate_per_sec": 0,
+        },
+        system_operations=SystemOperationSignals(
+            deletion_rate_per_sec=deletion_rate,
+            cleanup_delete_rate_per_sec=cleanup_rate,
+        ),
+    )
+
+
+def test_system_busy_not_idle():
+    """Cluster with high deletion rate is NOT idle."""
+    signals = _system_busy_signals(deletion_rate=50.0)
+    assert not _is_idle(signals)
+    assert _is_system_busy(signals)
+
+
+def test_system_busy_suppresses_throughput_critical():
+    """Zero workflow throughput + high deletion rate does NOT trigger CRITICAL.
+
+    During a retention storm, the cluster has zero state transitions but
+    is actively processing deletions. Throughput-based CRITICAL gates
+    (signals 1, 3, 5) should be suppressed.
+    """
+    signals = _system_busy_signals(deletion_rate=200.0, cleanup_rate=50.0)
+
+    # Even with sustained critical count, should not go CRITICAL
+    result, _, _ = evaluate_health_state(
+        signals,
+        HealthState.STRESSED,
+        consecutive_critical_count=CONSECUTIVE_CRITICAL_THRESHOLD,
+    )
+    assert result != HealthState.CRITICAL
+
+
+@given(current_state=health_states)
+@settings(max_examples=100)
+def test_system_busy_never_critical_from_throughput(current_state: HealthState):
+    """System-busy cluster never goes CRITICAL from throughput gates alone."""
+    signals = _system_busy_signals(deletion_rate=100.0)
+    result, _, _ = evaluate_health_state(
+        signals,
+        current_state,
+        consecutive_critical_count=CONSECUTIVE_CRITICAL_THRESHOLD + 10,
+    )
+    # From HAPPY, invariant prevents CRITICAL anyway. From STRESSED/CRITICAL,
+    # system-busy should suppress throughput gates.
+    assert result != HealthState.CRITICAL
+
+
+def test_system_busy_still_critical_on_persistence_errors():
+    """Persistence error gate still fires during system-busy.
+
+    Even when the cluster is doing legitimate deletion work, if
+    persistence is failing (not just slow), that's a real problem.
+    """
+    signals = _system_busy_signals(
+        deletion_rate=200.0,
+        persistence_error_rate=100.0,  # Well above the 50.0 threshold
+    )
+    result, count, _ = evaluate_health_state(
+        signals,
+        HealthState.STRESSED,
+        consecutive_critical_count=CONSECUTIVE_CRITICAL_THRESHOLD,
+    )
+    assert result == HealthState.CRITICAL
+
+
+def test_system_busy_still_critical_on_extreme_backlog():
+    """Backlog gate still fires during system-busy.
+
+    Even during retention storms, extreme history backlog (>300s)
+    indicates the system is falling behind on real work.
+    """
+    signals = _system_busy_signals(
+        deletion_rate=200.0,
+        backlog_age=700.0,  # Well above STARTER critical threshold (600s)
+    )
+    result, count, _ = evaluate_health_state(
+        signals,
+        HealthState.STRESSED,
+        consecutive_critical_count=CONSECUTIVE_CRITICAL_THRESHOLD,
+    )
+    assert result == HealthState.CRITICAL
+
+
+def test_system_busy_threshold():
+    """Deletion rate below 5.0 ops/s is NOT system-busy."""
+    signals = PrimarySignals(
+        state_transitions={"throughput_per_sec": 0, "latency_p95_ms": 0, "latency_p99_ms": 0},
+        workflow_completion={"completion_rate": 1.0, "success_per_sec": 0, "failed_per_sec": 0},
+        history={
+            "backlog_age_sec": 0,
+            "task_processing_rate_per_sec": 0,
+            "shard_churn_rate_per_sec": 0,
+        },
+        frontend={"error_rate_per_sec": 0, "latency_p95_ms": 0, "latency_p99_ms": 0},
+        matching={"workflow_backlog_age_sec": 0, "activity_backlog_age_sec": 0},
+        poller={"poll_success_rate": 1.0, "poll_timeout_rate": 0, "long_poll_latency_ms": 0},
+        persistence={
+            "latency_p95_ms": 0,
+            "latency_p99_ms": 0,
+            "error_rate_per_sec": 0,
+            "retry_rate_per_sec": 0,
+        },
+        system_operations=SystemOperationSignals(
+            deletion_rate_per_sec=2.0,
+            cleanup_delete_rate_per_sec=0.3,
+        ),
+    )
+    assert not _is_system_busy(signals)
+
+
+@given(
+    deletion_rate=st.floats(min_value=5.0, max_value=500.0, allow_nan=False),
+    current_state=health_states,
+)
+@settings(max_examples=200)
+def test_system_busy_never_idle(deletion_rate: float, current_state: HealthState):
+    """System-busy and idle are mutually exclusive.
+
+    If the cluster has active system operations above the threshold,
+    it should never be classified as idle.
+    """
+    signals = PrimarySignals(
+        state_transitions={"throughput_per_sec": 0, "latency_p95_ms": 0, "latency_p99_ms": 0},
+        workflow_completion={"completion_rate": 1.0, "success_per_sec": 0, "failed_per_sec": 0},
+        history={
+            "backlog_age_sec": 0,
+            "task_processing_rate_per_sec": 0,
+            "shard_churn_rate_per_sec": 0,
+        },
+        frontend={"error_rate_per_sec": 0, "latency_p95_ms": 0, "latency_p99_ms": 0},
+        matching={"workflow_backlog_age_sec": 0, "activity_backlog_age_sec": 0},
+        poller={"poll_success_rate": 1.0, "poll_timeout_rate": 0, "long_poll_latency_ms": 0},
+        persistence={
+            "latency_p95_ms": 0,
+            "latency_p99_ms": 0,
+            "error_rate_per_sec": 0,
+            "retry_rate_per_sec": 0,
+        },
+        system_operations=SystemOperationSignals(
+            deletion_rate_per_sec=deletion_rate,
+            cleanup_delete_rate_per_sec=0.0,
+        ),
+    )
+    assert _is_system_busy(signals)
+    assert not _is_idle(signals)

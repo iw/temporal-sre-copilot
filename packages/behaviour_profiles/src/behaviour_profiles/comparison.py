@@ -52,6 +52,9 @@ def _compare_config(a: BehaviourProfile, b: BehaviourProfile) -> list[ConfigDiff
     """Compare dynamic config and env vars between two profiles."""
     diffs: list[ConfigDiff] = []
 
+    if a.config_snapshot is None or b.config_snapshot is None:
+        return diffs
+
     # Dynamic config
     a_dc = {e.key: e.value for e in a.config_snapshot.dynamic_config}
     b_dc = {e.key: e.value for e in b.config_snapshot.dynamic_config}
@@ -59,7 +62,12 @@ def _compare_config(a: BehaviourProfile, b: BehaviourProfile) -> list[ConfigDiff
         old = a_dc.get(key)
         new = b_dc.get(key)
         if old != new and old is not None and new is not None:
-            diffs.append(ConfigDiff(key=f"dynamic_config.{key}", old_value=old, new_value=new))
+            # ConfigDiff accepts int | float | str | bool; stringify list values
+            old_val: int | float | str | bool = str(old) if isinstance(old, list) else old
+            new_val: int | float | str | bool = str(new) if isinstance(new, list) else new
+            diffs.append(
+                ConfigDiff(key=f"dynamic_config.{key}", old_value=old_val, new_value=new_val)
+            )
 
     # Server env vars (skip redacted)
     a_env = {e.name: e.value for e in a.config_snapshot.server_env_vars if not e.redacted}

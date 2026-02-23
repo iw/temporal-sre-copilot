@@ -102,15 +102,78 @@ def _run(cmd: list[str], *, check: bool = True) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Deployment profile generation
+# Active context resolution
 # ---------------------------------------------------------------------------
 
+_CONFIG_BASE_DIR = Path(".temporal-dsql")
+_ACTIVE_CONTEXT_FILE = ".active_context"
 
-def _config_dir(name: str) -> Path:
-    """Return the path to a named config profile under ``.temporal-dsql/``."""
-    # Normalize for filesystem safety
-    safe_name = name.replace("/", "-").replace("\\", "-").strip("-")
-    return _repo_root() / ".temporal-dsql" / safe_name
+
+def _read_active_context() -> tuple[str, str] | None:
+    """Read the active context from .temporal-dsql/.active_context.
+
+    Returns:
+        Tuple of (config name, config profile ID) or None.
+    """
+    ctx_path = _repo_root() / _CONFIG_BASE_DIR / _ACTIVE_CONTEXT_FILE
+    if not ctx_path.exists():
+        return None
+    content = ctx_path.read_text().strip()
+    if not content or "/" not in content:
+        return None
+    name, profile_id = content.split("/", 1)
+    return (name, profile_id) if name and profile_id else None
+
+
+def _resolve_config_dir(
+    config: str, context: str | None = None
+) -> Path:
+    """Resolve the config profile directory from active context or explicit context.
+
+    Args:
+        config: Config profile name (e.g., "dev").
+        context: Explicit config profile UUID (overrides active context).
+
+    Returns:
+        Path to the config profile directory.
+    """
+    base = _repo_root() / _CONFIG_BASE_DIR
+
+    if context:
+        path = base / config / context
+        if not path.exists():
+            console.print(f"[red]Config context not found:[/red] {path}")
+            raise typer.Exit(1)
+        return path
+
+    # Read active context
+    ctx = _read_active_context()
+    if ctx:
+        ctx_name, ctx_id = ctx
+        # If active context matches the requested config name, use it
+        if ctx_name == config:
+            path = base / ctx_name / ctx_id
+            if path.exists():
+                return path
+
+    # Fallback: find the most recent UUID directory under the config name
+    config_dir = base / config
+    if not config_dir.exists():
+        console.print(f"[red]No config profile found for '{config}'[/red]")
+        console.print(
+            f"  Run: just config compile starter --name {config} "
+            "--deployment compose --from dev/docker-compose.yml"
+        )
+        raise typer.Exit(1)
+
+    # List UUID directories and pick the most recently modified
+    subdirs = [d for d in config_dir.iterdir() if d.is_dir()]
+    if not subdirs:
+        console.print(f"[red]No instantiated config profiles under '{config}'[/red]")
+        raise typer.Exit(1)
+
+    latest = max(subdirs, key=lambda d: d.stat().st_mtime)
+    return latest
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +185,10 @@ def _config_dir(name: str) -> Path:
 def up(
     detach: Annotated[bool, typer.Option("--detach", "-d", help="Run in detached mode")] = True,
     config: Annotated[str, typer.Option("--config", "-c", help="Config profile name")] = "dev",
+    context: Annotated[
+        str | None,
+        typer.Option("--context", help="Explicit config profile UUID (overrides active context)"),
+    ] = None,
 ) -> None:
     """Start all Docker Compose services.
 
@@ -131,7 +198,8 @@ def up(
     """
     console.print(Panel.fit("Starting Dev Environment", style="bold blue"))
 
-    profile_path = _config_dir(config) / "deployment-profile.json"
+    config_dir = _resolve_config_dir(config, context)
+    profile_path = config_dir / "deployment_profile.json"
     if not profile_path.exists():
         console.print(f"[red]Deployment profile not found:[/red] {profile_path}")
         console.print(
@@ -140,7 +208,15 @@ def up(
         )
         raise typer.Exit(1)
 
-    console.print(f"[dim]Using config profile: {config}[/dim]")
+    console.print(f"[dim]Using config profile: {config_dir.relative_to(_repo_root())}[/dim]")
+
+    # Create/update the `current` symlink so docker-compose.yml can mount
+    # from a stable path: .temporal-dsql/<name>/current/deployment_profile.json
+    current_link = config_dir.parent / "current"
+    if current_link.is_symlink() or current_link.exists():
+        current_link.unlink()
+    current_link.symlink_to(config_dir.name)
+
     cmd = _compose_cmd("up")
     if detach:
         cmd.append("-d")
@@ -206,7 +282,7 @@ async def _build_temporal_async(
              temporal-dsql-runtime:test.
     """
     import dagger
-    from dagger import dag
+    from dagger import dag  # type: ignore[attr-defined]
 
     # Read Go version from go.mod so we never drift
     go_version = _go_version_from_mod(source_path / "go.mod")
@@ -223,7 +299,7 @@ async def _build_temporal_async(
             exclude=[".git", ".venv", "**/__pycache__"],
         )
 
-        platform = dagger.Platform(f"linux/{arch}")
+        platform = dagger.Platform(f"linux/{arch}")  # type: ignore[attr-defined]
         go_builder = (
             dag.container(platform=platform)
             .from_(go_image)
@@ -301,7 +377,7 @@ async def _build_temporal_async(
             )
         )
 
-        await base.export_image.__wrapped__(base, "temporal-dsql:latest")
+        await base.export_image.__wrapped__(base, "temporal-dsql:latest")  # type: ignore[attr-defined]
 
         # --- Stage 3: Layer runtime config → temporal-dsql-runtime:test ---
         console.print("[bold]Stage 3/3:[/bold] Building temporal-dsql-runtime:test …")
@@ -330,7 +406,7 @@ async def _build_temporal_async(
             .with_default_args([])
         )
 
-        await runtime.export_image.__wrapped__(runtime, "temporal-dsql-runtime:test")
+        await runtime.export_image.__wrapped__(runtime, "temporal-dsql-runtime:test")  # type: ignore[attr-defined]
 
     console.print()
     console.print("[green]✓[/green] Temporal images built:")
@@ -341,7 +417,7 @@ async def _build_temporal_async(
 async def _build_copilot_async(repo_root: Path, *, no_cache: bool = False) -> None:
     """Build the Copilot Docker image from the repo-root Dockerfile."""
     import dagger
-    from dagger import dag
+    from dagger import dag  # type: ignore[attr-defined]
 
     config = dagger.Config(log_output=sys.stderr)
 
@@ -354,9 +430,9 @@ async def _build_copilot_async(repo_root: Path, *, no_cache: bool = False) -> No
         if no_cache:
             # Force a fresh build by injecting a unique build arg
             builder = source_dir.docker_build(
-                build_args=[dagger.BuildArg(name="CACHEBUSTER", value=str(datetime.now()))]
+                build_args=[dagger.BuildArg(name="CACHEBUSTER", value=str(datetime.now()))]  # type: ignore[attr-defined]
             )
-        await builder.export_image.__wrapped__(builder, "temporal-sre-copilot:dev")
+        await builder.export_image.__wrapped__(builder, "temporal-sre-copilot:dev")  # type: ignore[attr-defined]
 
     console.print()
     console.print("[green]✓[/green] Image built: temporal-sre-copilot:dev")

@@ -244,8 +244,15 @@ def evaluate_health_state(
     if _is_idle(primary):
         return HealthState.HAPPY, 0, new_scale_band
 
+    # System-busy detection: the cluster has zero workflow throughput but
+    # is actively processing system operations (retention deletions,
+    # archival). This is legitimate work that doesn't generate state
+    # transition events. Suppress throughput-based CRITICAL gates but
+    # still evaluate persistence latency and error gates.
+    system_busy = _is_system_busy(primary)
+
     # Check CRITICAL gates first (any one triggers)
-    if _is_critical(primary, critical):
+    if _is_critical(primary, critical, system_busy=system_busy):
         new_count = consecutive_critical_count + 1
 
         if new_count >= CONSECUTIVE_CRITICAL_THRESHOLD:
@@ -289,6 +296,7 @@ def _is_idle(primary: PrimarySignals) -> bool:
     - Zero errors (nothing is failing)
     - Low backlog (nothing meaningful is waiting)
     - Zero workflow failures
+    - No system operations running (no retention/archival activity)
 
     This distinguishes "quiet" from "broken." A broken cluster
     typically has errors, sustained backlog buildup, or non-zero failure rates.
@@ -316,13 +324,42 @@ def _is_idle(primary: PrimarySignals) -> bool:
         and primary.matching.workflow_backlog_age_sec < 5.0
         and primary.matching.activity_backlog_age_sec < 5.0
     )
+    # System operations (retention, archival) mean the cluster is busy, not idle.
+    has_no_system_ops = (
+        primary.system_operations.deletion_rate_per_sec < 1.0
+        and primary.system_operations.cleanup_delete_rate_per_sec < 0.5
+    )
 
-    return has_no_throughput and has_no_errors and has_no_backlog
+    return has_no_throughput and has_no_errors and has_no_backlog and has_no_system_ops
+
+
+def _is_system_busy(primary: PrimarySignals) -> bool:
+    """Detect a cluster busy with system operations (retention, archival).
+
+    When the cluster has zero workflow throughput but is actively
+    processing deletion or archival tasks, it's doing legitimate work
+    that doesn't generate state transition events. A retention storm
+    can generate 200+ persistence ops/s of pure deletion work.
+
+    This is distinct from idle (no work at all) and from broken
+    (workflow throughput collapsed under load).
+
+    The threshold of 5.0 deletion ops/s is well above background noise
+    but catches any meaningful retention or archival activity.
+    """
+    has_low_workflow_throughput = primary.state_transitions.throughput_per_sec < 5.0
+    has_system_ops = (
+        primary.system_operations.deletion_rate_per_sec >= 5.0
+        or primary.system_operations.cleanup_delete_rate_per_sec >= 1.0
+    )
+    return has_low_workflow_throughput and has_system_ops
 
 
 def _is_critical(
     primary: PrimarySignals,
     thresholds: CriticalThresholds,
+    *,
+    system_busy: bool = False,
 ) -> bool:
     """Check if any CRITICAL gate is triggered.
 
@@ -332,36 +369,46 @@ def _is_critical(
     - Signal 4: History backlog age exceeds critical threshold
     - Signal 5: History processing rate drops below minimum
     - Signal 12: Persistence error rate exceeds maximum
+
+    When system_busy is True, throughput-based gates (1, 3, 5) are
+    suppressed — the cluster is doing legitimate system work (retention,
+    archival) that doesn't generate state transition events. Persistence
+    and backlog gates still fire because system operations that cause
+    6s persistence latency or massive backlog ARE worth flagging.
     """
-    # Signal 1: State transition throughput collapsed
-    if primary.state_transitions.throughput_per_sec < thresholds.state_transitions_min_per_sec:
-        return True
+    if not system_busy:
+        # Signal 1: State transition throughput collapsed
+        if primary.state_transitions.throughput_per_sec < thresholds.state_transitions_min_per_sec:
+            return True
 
-    # Signal 3: Workflow completion rate collapsed — but only when there's
-    # meaningful demand. During ramp-up, completions lag behind starts by
-    # design. We require at least some completions+failures flowing before
-    # treating a low ratio as a real problem.
-    total_terminal = (
-        primary.workflow_completion.success_per_sec + primary.workflow_completion.failed_per_sec
-    )
-    if (
-        total_terminal >= thresholds.completion_rate_demand_floor_per_sec
-        and primary.workflow_completion.completion_rate < thresholds.workflow_completion_rate_min
-    ):
-        return True
+        # Signal 3: Workflow completion rate collapsed — but only when there's
+        # meaningful demand. During ramp-up, completions lag behind starts by
+        # design. We require at least some completions+failures flowing before
+        # treating a low ratio as a real problem.
+        total_terminal = (
+            primary.workflow_completion.success_per_sec
+            + primary.workflow_completion.failed_per_sec
+        )
+        if (
+            total_terminal >= thresholds.completion_rate_demand_floor_per_sec
+            and primary.workflow_completion.completion_rate
+            < thresholds.workflow_completion_rate_min
+        ):
+            return True
 
-    # Signal 4: History backlog age critical
+        # Signal 5: History processing rate collapsed
+        if (
+            primary.history.task_processing_rate_per_sec
+            < thresholds.history_processing_rate_min_per_sec
+        ):
+            return True
+
+    # Signal 4: History backlog age critical — always evaluated.
+    # Even during system operations, extreme backlog indicates trouble.
     if primary.history.backlog_age_sec > thresholds.history_backlog_age_max_sec:
         return True
 
-    # Signal 5: History processing rate collapsed
-    if (
-        primary.history.task_processing_rate_per_sec
-        < thresholds.history_processing_rate_min_per_sec
-    ):
-        return True
-
-    # Signal 12: Persistence failing (not just slow)
+    # Signal 12: Persistence failing (not just slow) — always evaluated.
     return primary.persistence.error_rate_per_sec > thresholds.persistence_error_rate_max_per_sec
 
 

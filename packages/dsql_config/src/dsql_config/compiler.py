@@ -79,11 +79,13 @@ class ConfigCompiler:
         dsql_plugin_version: str = "1.26.2",
         compiler_version: str = "0.1.0",
     ) -> None:
+        from packaging.version import Version
+
         self._registry = registry
         self._guard_rail_engine = guard_rail_engine
-        self._temporal_server_version = temporal_server_version
-        self._dsql_plugin_version = dsql_plugin_version
-        self._compiler_version = compiler_version
+        self._temporal_server_version = Version(temporal_server_version)
+        self._dsql_plugin_version = Version(dsql_plugin_version)
+        self._compiler_version = Version(compiler_version)
 
     def compile(
         self,

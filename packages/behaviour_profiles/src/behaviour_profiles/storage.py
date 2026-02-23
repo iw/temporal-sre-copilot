@@ -77,7 +77,7 @@ class ProfileStorage:
         body = await resp["Body"].read()
         return BehaviourProfile.model_validate_json(body)
 
-    async def list(
+    async def list_profiles(
         self,
         *,
         cluster: str | None = None,

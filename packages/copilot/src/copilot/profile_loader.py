@@ -1,7 +1,7 @@
 """Load a DeploymentProfile from a local file or S3 URI.
 
 The DEPLOYMENT_PROFILE env var points to either:
-- A local file path (e.g., /app/deployment-profile.json)
+- A local file path (e.g., /app/deployment_profile.json)
 - An S3 URI (e.g., s3://bucket/key)
 """
 
