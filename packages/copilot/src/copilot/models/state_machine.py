@@ -471,10 +471,10 @@ def _is_stressed(
         return True
 
     # Signal 8: Frontend latency rising — demand-gated.
-    # On low-throughput clusters, long-poll operations (workers waiting
-    # ~60-90s for tasks) inflate frontend latency p99 to ~90-100s.
-    # This is expected behavior, not degradation. Only evaluate when
-    # there's enough throughput for the metric to reflect real API latency.
+    # The PromQL query excludes long-poll operations (Poll*TaskQueue),
+    # so this metric reflects real API latency only. The demand gate
+    # remains to avoid noise from idle clusters where the few non-poll
+    # requests may have high variance.
     if (
         primary.state_transitions.throughput_per_sec >= 5.0
         and primary.frontend.latency_p99_ms > thresholds.frontend_latency_p99_max_ms

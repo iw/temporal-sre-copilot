@@ -93,13 +93,31 @@ class HistorySignals(BaseModel):
 
 
 class FrontendSignals(BaseModel):
-    """Signals 7-8: Frontend service health."""
+    """Signals 7-8: Frontend service health.
+
+    latency_p95/p99 exclude long-poll operations (Poll*TaskQueue) so they
+    reflect real API latency. long_poll_latency_p99 captures the raw
+    unfiltered metric. When latency is 0 but long_poll_latency is ~90s,
+    the cluster has only poll traffic and no real service requests.
+    """
 
     error_rate_per_sec: float = Field(
         ge=0, description="When clients are actually impacted. Often lags behind stress."
     )
-    latency_p95_ms: float = Field(ge=0, description="Whether API surface is degrading.")
-    latency_p99_ms: float = Field(ge=0, description="Tail latency for frontend requests")
+    latency_p95_ms: float = Field(
+        ge=0, description="API latency excluding long-poll operations."
+    )
+    latency_p99_ms: float = Field(
+        ge=0, description="Tail latency excluding long-poll operations."
+    )
+    long_poll_latency_p99_ms: float = Field(
+        default=0.0,
+        ge=0,
+        description=(
+            "Raw frontend p99 including long-polls. When latency_p99 is 0 "
+            "but this is ~90s, all traffic is worker long-polls (no real requests)."
+        ),
+    )
 
 
 class MatchingSignals(BaseModel):

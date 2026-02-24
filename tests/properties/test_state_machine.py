@@ -436,12 +436,12 @@ def test_low_completion_rate_during_ramp_up_not_critical():
 @given(current_state=health_states)
 @settings(max_examples=100)
 def test_long_poll_contamination_not_stressed(current_state: HealthState):
-    """High frontend latency from long-polls on idle cluster is not STRESSED.
+    """Idle cluster with only long-poll traffic is HAPPY.
 
-    On low-throughput clusters, long-poll operations (workers waiting ~90s
-    for tasks) inflate frontend latency p99 to ~90-100s. This is expected
-    behavior, not degradation. The state machine should recognize this as
-    idle and return HAPPY.
+    When there are zero real service requests, the filtered frontend
+    latency (excluding Poll*TaskQueue) returns 0ms. The raw
+    long_poll_latency_p99 shows ~98s, confirming all traffic is
+    worker long-polls. The state machine sees this as idle.
     """
     signals = PrimarySignals(
         state_transitions={"throughput_per_sec": 2.0, "latency_p95_ms": 9, "latency_p99_ms": 15},
@@ -451,7 +451,12 @@ def test_long_poll_contamination_not_stressed(current_state: HealthState):
             "task_processing_rate_per_sec": 2.0,
             "shard_churn_rate_per_sec": 0,
         },
-        frontend={"error_rate_per_sec": 0, "latency_p95_ms": 92000, "latency_p99_ms": 98000},
+        frontend={
+            "error_rate_per_sec": 0,
+            "latency_p95_ms": 0,
+            "latency_p99_ms": 0,
+            "long_poll_latency_p99_ms": 98000,
+        },
         matching={"workflow_backlog_age_sec": 0, "activity_backlog_age_sec": 0},
         poller={
             "poll_success_rate": 0.52,
@@ -467,13 +472,17 @@ def test_long_poll_contamination_not_stressed(current_state: HealthState):
     )
     result, _, _ = evaluate_health_state(signals, current_state)
     assert result == HealthState.HAPPY
+    # Verify the distinction: filtered latency is 0, raw includes long-polls
+    assert signals.frontend.latency_p99_ms == 0
+    assert signals.frontend.long_poll_latency_p99_ms == 98000
 
 
 def test_high_frontend_latency_stressed_under_load():
     """High frontend latency WITH real throughput IS stressed.
 
-    When there's meaningful demand (>5 st/s), high frontend latency
-    is a real problem, not a long-poll artifact.
+    The PromQL query excludes long-poll operations, so frontend latency
+    reflects real API calls. At 50 st/s (MID_SCALE band), the threshold
+    is 2,000ms. A p99 of 3,000ms indicates genuine API degradation.
     """
     signals = PrimarySignals(
         state_transitions={"throughput_per_sec": 50, "latency_p95_ms": 50, "latency_p99_ms": 100},
@@ -483,7 +492,7 @@ def test_high_frontend_latency_stressed_under_load():
             "task_processing_rate_per_sec": 50,
             "shard_churn_rate_per_sec": 0,
         },
-        frontend={"error_rate_per_sec": 0, "latency_p95_ms": 5000, "latency_p99_ms": 10000},
+        frontend={"error_rate_per_sec": 0, "latency_p95_ms": 2500, "latency_p99_ms": 3000},
         matching={"workflow_backlog_age_sec": 0, "activity_backlog_age_sec": 0},
         poller={"poll_success_rate": 0.95, "poll_timeout_rate": 0.05, "long_poll_latency_ms": 100},
         persistence={

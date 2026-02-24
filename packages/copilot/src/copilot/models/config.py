@@ -363,7 +363,7 @@ THRESHOLD_PROFILES: dict[ScaleBand, ThresholdProfile] = {
         stressed=StressedThresholds(
             state_transition_latency_p99_max_ms=2000.0,
             history_backlog_age_stress_sec=120.0,
-            frontend_latency_p99_max_ms=3000.0,
+            frontend_latency_p99_max_ms=5000.0,
             persistence_latency_p99_max_ms=500.0,
             poller_timeout_rate_max=0.5,
         ),

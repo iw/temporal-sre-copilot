@@ -89,14 +89,26 @@ PRIMARY_QUERIES = {
     "history_processing_rate": ('sum(rate(task_requests_total{service_name="history"}[1m]))'),
     "history_shard_churn": "sum(rate(sharditem_created_count_total[5m]))",
     # Signal 7-8: Frontend service (timer → _milliseconds)
+    # Exclude long-poll operations (PollWorkflowTaskQueue, PollActivityTaskQueue,
+    # PollNexusTaskQueue) which have ~90s timeouts and dominate the p99 distribution.
+    # Without this filter, frontend p99 reads ~99s even on a healthy cluster.
     "frontend_error_rate": (
         'sum(rate(service_error_with_type_total{service_name="frontend"}[1m]))'
     ),
     "frontend_latency_p95": (
         "histogram_quantile(0.95, sum by (le)"
-        ' (rate(service_latency_milliseconds_bucket{service_name="frontend"}[5m])))'
+        " (rate(service_latency_milliseconds_bucket"
+        '{service_name="frontend", operation!~"Poll.*TaskQueue"}[5m])))'
     ),
     "frontend_latency_p99": (
+        "histogram_quantile(0.99, sum by (le)"
+        " (rate(service_latency_milliseconds_bucket"
+        '{service_name="frontend", operation!~"Poll.*TaskQueue"}[5m])))'
+    ),
+    # Raw frontend p99 including long-polls — used to distinguish
+    # "no real requests" (latency_p99=0, long_poll=~90s) from
+    # "genuinely low latency" (both near 0).
+    "frontend_long_poll_latency_p99": (
         "histogram_quantile(0.99, sum by (le)"
         ' (rate(service_latency_milliseconds_bucket{service_name="frontend"}[5m])))'
     ),
@@ -368,6 +380,7 @@ def _build_primary_signals(results: dict[str, float]) -> PrimarySignals:
             error_rate_per_sec=results.get("frontend_error_rate", 0),
             latency_p95_ms=results.get("frontend_latency_p95", 0),
             latency_p99_ms=results.get("frontend_latency_p99", 0),
+            long_poll_latency_p99_ms=results.get("frontend_long_poll_latency_p99", 0),
         ),
         matching=MatchingSignals(
             workflow_backlog_age_sec=results.get("matching_workflow_backlog", 0),
