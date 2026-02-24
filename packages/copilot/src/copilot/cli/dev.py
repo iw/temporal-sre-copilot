@@ -125,9 +125,7 @@ def _read_active_context() -> tuple[str, str] | None:
     return (name, profile_id) if name and profile_id else None
 
 
-def _resolve_config_dir(
-    config: str, context: str | None = None
-) -> Path:
+def _resolve_config_dir(config: str, context: str | None = None) -> Path:
     """Resolve the config profile directory from active context or explicit context.
 
     Args:

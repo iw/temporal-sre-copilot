@@ -104,12 +104,8 @@ class FrontendSignals(BaseModel):
     error_rate_per_sec: float = Field(
         ge=0, description="When clients are actually impacted. Often lags behind stress."
     )
-    latency_p95_ms: float = Field(
-        ge=0, description="API latency excluding long-poll operations."
-    )
-    latency_p99_ms: float = Field(
-        ge=0, description="Tail latency excluding long-poll operations."
-    )
+    latency_p95_ms: float = Field(ge=0, description="API latency excluding long-poll operations.")
+    latency_p99_ms: float = Field(ge=0, description="Tail latency excluding long-poll operations.")
     long_poll_latency_p99_ms: float = Field(
         default=0.0,
         ge=0,

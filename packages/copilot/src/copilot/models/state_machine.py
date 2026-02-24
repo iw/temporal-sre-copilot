@@ -386,8 +386,7 @@ def _is_critical(
         # design. We require at least some completions+failures flowing before
         # treating a low ratio as a real problem.
         total_terminal = (
-            primary.workflow_completion.success_per_sec
-            + primary.workflow_completion.failed_per_sec
+            primary.workflow_completion.success_per_sec + primary.workflow_completion.failed_per_sec
         )
         if (
             total_terminal >= thresholds.completion_rate_demand_floor_per_sec

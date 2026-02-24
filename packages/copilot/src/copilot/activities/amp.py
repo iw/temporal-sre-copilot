@@ -154,12 +154,8 @@ PRIMARY_QUERIES = {
     ),
     # System operations: deletion and cleanup throughput
     # These track non-workflow forward progress (retention, archival).
-    "system_deletion_rate": (
-        'sum(rate(task_requests_total{task_type=~".*Delete.*"}[1m]))'
-    ),
-    "system_cleanup_delete_rate": (
-        "sum(rate(workflow_cleanup_delete_total[1m]))"
-    ),
+    "system_deletion_rate": ('sum(rate(task_requests_total{task_type=~".*Delete.*"}[1m]))'),
+    "system_cleanup_delete_rate": ("sum(rate(workflow_cleanup_delete_total[1m]))"),
 }
 
 

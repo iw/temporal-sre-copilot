@@ -65,6 +65,11 @@ from .config import (
     ThresholdProfile,
     get_threshold_profile,
 )
+from .gate_evaluation import (
+    GateEvaluation,
+    GateResult,
+    evaluate_gates,
+)
 from .signals import (
     # Primary signal components
     AmplifierSignals,
@@ -184,6 +189,10 @@ __all__ = [
     "refine_thresholds",
     "WorkerScalingWarning",
     "WorkerScalingContext",
+    # Gate Evaluation
+    "GateEvaluation",
+    "GateResult",
+    "evaluate_gates",
     # Workflow Inputs
     "ObserveClusterInput",
     "LogWatcherInput",

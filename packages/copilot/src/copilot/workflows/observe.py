@@ -35,6 +35,7 @@ with workflow.unsafe.imports_passed_through():
         Signals,
         StoreSignalsInput,
     )
+    from copilot.models.gate_evaluation import evaluate_gates
     from copilot.models.state_machine import evaluate_health_state
     from copilot_core.deployment import (
         DeploymentContext,  # noqa: TC001 — used at runtime in workflow
@@ -140,6 +141,14 @@ class ObserveClusterWorkflow:
                         f"Health state changed: {self._current_state.value} → {new_state.value}"
                     )
 
+                    # Compute gate evaluation so the LLM knows exactly
+                    # which gates fired and which passed.
+                    gate_eval = evaluate_gates(
+                        signals.primary,
+                        new_state,
+                        self._current_scale_band or ScaleBand.STARTER,
+                    )
+
                     await workflow.start_child_workflow(
                         "AssessHealthWorkflow",
                         args=[
@@ -148,6 +157,7 @@ class ObserveClusterWorkflow:
                                 signals=signals,
                                 trigger="state_change",
                                 dsql_endpoint=input.dsql_endpoint,
+                                gate_evaluation=gate_eval,
                             )
                         ],
                         id=f"assess-health-{workflow.now().isoformat()}",

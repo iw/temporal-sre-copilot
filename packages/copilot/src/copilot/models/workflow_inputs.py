@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 
 from copilot_core.deployment import DeploymentProfile  # noqa: TC001 — Pydantic needs runtime
 
+from .gate_evaluation import GateEvaluation  # noqa: TC001 — Pydantic needs runtime
 from .signals import HealthState, Signals  # noqa: TC001 — Pydantic needs runtime imports
 
 
@@ -71,6 +72,10 @@ class AssessHealthInput(BaseModel):
     dsql_endpoint: str = Field(default="localhost", description="DSQL endpoint for storage")
     kb_id: str | None = Field(default=None, description="Bedrock Knowledge Base ID for RAG context")
     loki_url: str | None = Field(default=None, description="Loki URL for fetching log patterns")
+    gate_evaluation: GateEvaluation | None = Field(
+        default=None,
+        description="Gate evaluation context from the state machine (which gates fired/passed)",
+    )
 
 
 class ScheduledAssessmentInput(BaseModel):

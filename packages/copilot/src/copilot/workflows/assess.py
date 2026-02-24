@@ -201,6 +201,7 @@ class AssessHealthWorkflow(PydanticAIWorkflow):
                 rag_context,
                 signal_history,
                 input.trigger,
+                gate_evaluation=input.gate_evaluation,
             )
 
             # Run deep explanation via researcher agent
