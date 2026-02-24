@@ -226,6 +226,7 @@ class AssessHealthWorkflow(PydanticAIWorkflow):
                 assessment.trigger = input.trigger
                 assessment.primary_signals = input.signals.primary.model_dump()
                 assessment.amplifiers = input.signals.amplifiers.model_dump()
+                assessment.log_patterns = log_patterns
 
         else:
             # Fallback - shouldn't happen

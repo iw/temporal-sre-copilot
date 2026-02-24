@@ -112,6 +112,7 @@ async def _fetch_latest_assessment(pool: asyncpg.Pool) -> dict | None:
             "health_state": row["overall_status"],
             "primary_signals": metrics.get("primary_signals", {}),
             "amplifiers": metrics.get("amplifiers", {}),
+            "log_patterns": metrics.get("log_patterns", []),
             "issues": issues_data,
             "natural_language_summary": row["natural_language_summary"],
         }
@@ -505,6 +506,7 @@ async def get_status() -> StatusResponse:
         timestamp=signals_timestamp,
         primary_signals=primary_signals,
         amplifiers=amplifiers,
+        log_patterns=assessment.get("log_patterns", []),
         recommended_actions=recommended_actions[:5] if health_state != HealthState.HAPPY else [],
         issue_count=len(issues) if health_state != HealthState.HAPPY else 0,
     )

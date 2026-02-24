@@ -94,6 +94,7 @@ async def store_health_assessment(input: StoreAssessmentInput) -> str:
                 {
                     "primary_signals": assessment.primary_signals,
                     "amplifiers": assessment.amplifiers,
+                    "log_patterns": [p.model_dump() for p in assessment.log_patterns],
                 }
             ),
         )
@@ -198,7 +199,7 @@ async def get_latest_assessment(
             health_state=row["overall_status"],
             primary_signals=metrics.get("primary_signals", {}),
             amplifiers=metrics.get("amplifiers", {}),
-            log_patterns=[],
+            log_patterns=metrics.get("log_patterns", []),
             issues=[],  # Would need to fetch from issues table
             recommended_actions=[],
             natural_language_summary=row["natural_language_summary"],
@@ -246,7 +247,7 @@ async def get_assessments_in_range(
                     health_state=row["overall_status"],
                     primary_signals=metrics.get("primary_signals", {}),
                     amplifiers=metrics.get("amplifiers", {}),
-                    log_patterns=[],
+                    log_patterns=metrics.get("log_patterns", []),
                     issues=[],
                     recommended_actions=[],
                     natural_language_summary=row["natural_language_summary"],

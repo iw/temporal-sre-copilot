@@ -24,7 +24,7 @@ class StatusResponse(BaseModel):
     timestamp: str
     primary_signals: dict = Field(default_factory=dict)
     amplifiers: dict = Field(default_factory=dict)
-    log_patterns: list[str] = Field(default_factory=list)
+    log_patterns: list[dict] = Field(default_factory=list)
     recommended_actions: list[dict] = Field(default_factory=list)
     issue_count: int = 0
 
