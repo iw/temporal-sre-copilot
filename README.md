@@ -1,3 +1,5 @@
+> **⚠️ This project is no longer under active development.** It served as a research prototype for AI-powered Temporal observability. Effort has moved to Temporal Loom, a next-generation behavioral instrument for Temporal deployments. This repository is preserved for reference.
+
 # Temporal SRE Copilot
 
 An AI-powered observability agent for Temporal deployments on Aurora DSQL. The Copilot continuously monitors a running cluster, derives health state from forward progress signals using deterministic rules, and uses LLMs to explain what's happening — never to decide.
